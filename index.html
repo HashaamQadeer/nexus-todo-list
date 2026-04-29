@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NEXUS — Task Interface</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --cyan:    #00f5ff;
+  --purple:  #b400ff;
+  --green:   #00ff88;
+  --red:     #ff2d55;
+  --yellow:  #ffd60a;
+  --bg:      #040a14;
+  --panel:   rgba(0,245,255,0.04);
+  --border:  rgba(0,245,255,0.18);
+  --text:    #c8e8f0;
+  --glow:    0 0 18px rgba(0,245,255,0.45);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 16px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* ─── CUSTOM CURSOR ─── */
+#cursor {
+  position: fixed; top: 0; left: 0; z-index: 9999;
+  pointer-events: none; mix-blend-mode: difference;
+}
+.cursor-ring {
+  position: absolute; border-radius: 50%;
+  transform: translate(-50%,-50%);
+  transition: width .15s, height .15s, background .15s;
+}
+#c-dot  { width:8px; height:8px; background:var(--cyan); top:0; left:0; }
+#c-ring { width:32px; height:32px; border:1.5px solid var(--cyan); top:0; left:0;
+          background: transparent; transition: width .3s, height .3s, top .08s, left .08s; }
+
+/* ─── STARFIELD CANVAS ─── */
+#stars { position:fixed; inset:0; z-index:0; pointer-events:none; }
+
+/* ─── SCAN LINES ─── */
+body::after {
+  content:''; position:fixed; inset:0; z-index:1; pointer-events:none;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.08) 2px, rgba(0,0,0,.08) 4px);
+}
+
+/* ─── GRID OVERLAY ─── */
+body::before {
+  content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    linear-gradient(rgba(0,245,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,245,255,.025) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* ─── LAYOUT ─── */
+.page { position:relative; z-index:2; max-width:780px; margin:0 auto; padding:40px 20px 120px; }
+
+/* ─── HERO HEADER ─── */
+.hero {
+  text-align:center;
+  padding: 60px 0 40px;
+  opacity:0; transform:translateY(-30px);
+  transition: opacity .8s ease, transform .8s ease;
+}
+.hero.visible { opacity:1; transform:translateY(0); }
+
+.hero-tag {
+  font-family:'Orbitron',sans-serif;
+  font-size:10px; letter-spacing:6px;
+  color:var(--cyan); text-transform:uppercase;
+  margin-bottom:12px; display:block;
+  animation: pulse-tag 2.5s ease-in-out infinite;
+}
+@keyframes pulse-tag { 0%,100%{opacity:.6} 50%{opacity:1} }
+
+.hero h1 {
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(36px,8vw,68px);
+  font-weight:900; letter-spacing:4px;
+  background: linear-gradient(135deg, var(--cyan) 0%, var(--purple) 60%, var(--cyan) 100%);
+  background-size:200%;
+  -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  animation: shimmer 4s linear infinite;
+  line-height:1.1;
+}
+@keyframes shimmer { to{background-position:200% center} }
+
+.hero-sub {
+  font-size:14px; letter-spacing:3px; color:rgba(200,232,240,.5);
+  margin-top:10px; text-transform:uppercase;
+}
+
+/* ─── STATS BAR ─── */
+.stats-bar {
+  display:flex; gap:12px; justify-content:center;
+  margin:30px 0 0; flex-wrap:wrap;
+  opacity:0; transform:translateY(20px);
+  transition: opacity .8s .2s ease, transform .8s .2s ease;
+}
+.stats-bar.visible { opacity:1; transform:translateY(0); }
+
+.stat-chip {
+  background: var(--panel);
+  border:1px solid var(--border);
+  border-radius:4px; padding:6px 16px;
+  font-family:'Orbitron',sans-serif;
+  font-size:10px; letter-spacing:2px;
+  display:flex; align-items:center; gap:8px;
+}
+.stat-chip .val { font-size:18px; font-weight:700; }
+.stat-chip.t-cyan  .val { color:var(--cyan);   text-shadow: var(--glow); }
+.stat-chip.t-green .val { color:var(--green);  text-shadow:0 0 14px rgba(0,255,136,.5); }
+.stat-chip.t-red   .val { color:var(--red);    text-shadow:0 0 14px rgba(255,45,85,.5); }
+.stat-chip.t-yellow .val{ color:var(--yellow); text-shadow:0 0 14px rgba(255,214,10,.5); }
+
+/* ─── PROGRESS ─── */
+.progress-wrap {
+  margin:28px 0;
+  opacity:0; transform:translateX(-20px);
+  transition: opacity .8s .3s ease, transform .8s .3s ease;
+}
+.progress-wrap.visible { opacity:1; transform:translateX(0); }
+.progress-label {
+  font-family:'Orbitron',sans-serif;
+  font-size:9px; letter-spacing:3px;
+  color:rgba(200,232,240,.45); margin-bottom:8px;
+  display:flex; justify-content:space-between;
+}
+.progress-track {
+  height:4px; background:rgba(0,245,255,.1);
+  border-radius:2px; overflow:hidden;
+  box-shadow: inset 0 0 8px rgba(0,0,0,.5);
+}
+.progress-fill {
+  height:100%; background:linear-gradient(90deg,var(--purple),var(--cyan));
+  border-radius:2px; transition: width .6s cubic-bezier(.4,0,.2,1);
+  box-shadow: 0 0 12px var(--cyan);
+}
+
+/* ─── INPUT PANEL ─── */
+.input-panel {
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:20px;
+  margin-bottom:24px;
+  position:relative; overflow:hidden;
+  opacity:0; transform:scale(.97);
+  transition: opacity .7s .1s ease, transform .7s .1s ease;
+}
+.input-panel.visible { opacity:1; transform:scale(1); }
+
+.input-panel::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  animation: scan-line 3s linear infinite;
+}
+@keyframes scan-line {
+  0%   { transform:translateX(-100%); }
+  100% { transform:translateX(100%); }
+}
+
+.input-row { display:flex; gap:10px; margin-bottom:12px; }
+
+.input-row input[type="text"] {
+  flex:1; background:rgba(0,0,0,.4);
+  border:1px solid rgba(0,245,255,.25);
+  border-radius:8px; padding:12px 16px;
+  color:var(--cyan); font-family:'Rajdhani',sans-serif;
+  font-size:15px; outline:none;
+  transition: border-color .3s, box-shadow .3s;
+}
+.input-row input[type="text"]::placeholder { color:rgba(0,245,255,.3); }
+.input-row input[type="text"]:focus {
+  border-color:var(--cyan);
+  box-shadow: var(--glow), inset 0 0 20px rgba(0,245,255,.05);
+}
+
+.meta-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+
+select, input[type="date"] {
+  background:rgba(0,0,0,.4);
+  border:1px solid rgba(0,245,255,.2);
+  border-radius:6px; padding:8px 12px;
+  color:var(--text); font-family:'Rajdhani',sans-serif;
+  font-size:14px; outline:none;
+  transition: border-color .3s;
+}
+select:focus, input[type="date"]:focus { border-color:var(--cyan); }
+select option { background:#0d1a26; }
+
+input[type="date"]::-webkit-calendar-picker-indicator { filter:invert(.5) sepia(1) saturate(2) hue-rotate(170deg); cursor:pointer; }
+
+.btn {
+  font-family:'Orbitron',sans-serif;
+  font-size:11px; letter-spacing:2px;
+  padding:10px 20px; border:none;
+  border-radius:6px; cursor:pointer;
+  text-transform:uppercase;
+  transition: transform .2s, box-shadow .2s, background .2s;
+  position:relative; overflow:hidden;
+}
+.btn::after {
+  content:''; position:absolute; inset:0;
+  background:white; opacity:0;
+  transition: opacity .15s;
+}
+.btn:active::after { opacity:.1; }
+.btn:hover { transform:translateY(-2px); }
+
+.btn-add {
+  background:linear-gradient(135deg,#005f7a,#007a9e);
+  color:var(--cyan);
+  box-shadow: 0 0 20px rgba(0,245,255,.2);
+  flex-shrink:0;
+}
+.btn-add:hover { box-shadow:0 0 30px rgba(0,245,255,.45); }
+
+.btn-clear {
+  background:rgba(255,45,85,.12);
+  color:var(--red);
+  border:1px solid rgba(255,45,85,.3);
+}
+.btn-clear:hover { background:rgba(255,45,85,.22); box-shadow:0 0 20px rgba(255,45,85,.3); }
+
+/* ─── FILTER ROW ─── */
+.filter-row {
+  display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  margin-bottom:20px;
+  opacity:0; transition: opacity .7s .4s ease;
+}
+.filter-row.visible { opacity:1; }
+
+.filter-btn {
+  font-family:'Orbitron',sans-serif;
+  font-size:9px; letter-spacing:2px;
+  padding:6px 14px; border-radius:4px;
+  border:1px solid rgba(0,245,255,.2);
+  background:transparent; color:rgba(200,232,240,.45);
+  cursor:pointer; text-transform:uppercase;
+  transition:.3s;
+}
+.filter-btn:hover, .filter-btn.active {
+  border-color:var(--cyan); color:var(--cyan);
+  background:rgba(0,245,255,.08);
+  box-shadow: 0 0 12px rgba(0,245,255,.2);
+}
+
+.search-wrap { position:relative; margin-left:auto; }
+.search-wrap input {
+  background:rgba(0,0,0,.35);
+  border:1px solid rgba(0,245,255,.2);
+  border-radius:6px; padding:6px 12px 6px 34px;
+  color:var(--text); font-family:'Rajdhani',sans-serif;
+  font-size:13px; outline:none; width:180px;
+  transition: border-color .3s, width .3s;
+}
+.search-wrap input:focus { border-color:var(--cyan); width:220px; }
+.search-wrap .ico {
+  position:absolute; left:10px; top:50%; transform:translateY(-50%);
+  color:rgba(0,245,255,.4); font-size:13px; pointer-events:none;
+}
+
+/* ─── TASK LIST ─── */
+#task-list { list-style:none; display:flex; flex-direction:column; gap:14px; }
+
+/* ─── TASK ITEM ─── */
+.task-item {
+  background:rgba(4,10,20,.7);
+  border:1px solid rgba(0,245,255,.12);
+  border-radius:10px;
+  padding:14px 18px;
+  display:flex; align-items:center; gap:14px;
+  position:relative; overflow:hidden;
+  opacity:0; transform:translateX(-40px) translateY(10px);
+  transition:
+    opacity .5s ease,
+    transform .5s ease,
+    border-color .3s,
+    box-shadow .3s;
+  animation: float-idle 4s ease-in-out infinite;
+}
+.task-item.revealed {
+  opacity:1; transform:translateX(0) translateY(0);
+}
+.task-item:hover {
+  border-color:rgba(0,245,255,.4);
+  box-shadow:0 0 24px rgba(0,245,255,.12);
+  animation: float-hover 2s ease-in-out infinite;
+}
+
+@keyframes float-idle {
+  0%,100% { box-shadow:0 4px 20px rgba(0,0,0,.4), 0 0 0 rgba(0,245,255,0); }
+  50%      { box-shadow:0 8px 28px rgba(0,0,0,.5), 0 0 14px rgba(0,245,255,.07); }
+}
+@keyframes float-hover {
+  0%,100% { transform:translateY(0); }
+  50%      { transform:translateY(-4px); }
+}
+
+/* Priority accent strip */
+.task-item::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+  border-radius:10px 0 0 10px;
+}
+.task-item.p-high   ::before, .task-item.p-high::before   { background:var(--red); box-shadow:2px 0 12px var(--red); }
+.task-item.p-medium ::before, .task-item.p-medium::before { background:var(--yellow); box-shadow:2px 0 12px var(--yellow); }
+.task-item.p-low    ::before, .task-item.p-low::before    { background:var(--green); box-shadow:2px 0 12px var(--green); }
+
+/* shimmer on hover */
+.task-item::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(90deg,transparent 0%,rgba(0,245,255,.04) 50%,transparent 100%);
+  transform:translateX(-100%); transition:transform .5s;
+}
+.task-item:hover::after { transform:translateX(100%); }
+
+/* Checkbox */
+.task-check {
+  width:22px; height:22px; min-width:22px;
+  border-radius:4px; border:1.5px solid rgba(0,245,255,.35);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; background:rgba(0,0,0,.3);
+  transition: border-color .25s, background .25s, box-shadow .25s;
+  font-size:13px;
+}
+.task-check:hover { border-color:var(--cyan); box-shadow:0 0 10px rgba(0,245,255,.3); }
+.task-check.checked {
+  background:rgba(0,245,255,.15);
+  border-color:var(--cyan);
+  box-shadow: 0 0 14px rgba(0,245,255,.4);
+}
+
+/* Task body */
+.task-body { flex:1; min-width:0; }
+
+.task-text {
+  font-size:15px; font-weight:500; color:#e0f4f8;
+  transition: color .3s, opacity .3s;
+  word-break:break-word; line-height:1.3;
+}
+.task-text.done { text-decoration:line-through; color:rgba(200,232,240,.3); }
+
+.task-meta {
+  display:flex; gap:10px; margin-top:5px;
+  flex-wrap:wrap; align-items:center;
+}
+
+.badge {
+  font-family:'Orbitron',sans-serif;
+  font-size:8px; letter-spacing:1.5px; padding:2px 7px;
+  border-radius:3px; text-transform:uppercase; font-weight:600;
+}
+.badge-cat {
+  background:rgba(180,0,255,.15);
+  border:1px solid rgba(180,0,255,.3);
+  color:#d47fff;
+}
+.badge-pri.high   { background:rgba(255,45,85,.12);  border:1px solid rgba(255,45,85,.3);  color:var(--red); }
+.badge-pri.medium { background:rgba(255,214,10,.1);  border:1px solid rgba(255,214,10,.3); color:var(--yellow); }
+.badge-pri.low    { background:rgba(0,255,136,.1);   border:1px solid rgba(0,255,136,.25); color:var(--green); }
+
+.badge-due {
+  background:rgba(0,0,0,.3);
+  border:1px solid rgba(0,245,255,.15);
+  color:rgba(0,245,255,.6);
+  font-size:9px; padding:2px 7px;
+  border-radius:3px; font-family:'Orbitron',sans-serif; letter-spacing:1px;
+}
+.badge-due.overdue { border-color:rgba(255,45,85,.4); color:var(--red); animation: blink .9s step-end infinite; }
+@keyframes blink { 50%{opacity:.4} }
+
+/* Actions */
+.task-actions { display:flex; gap:6px; }
+.act-btn {
+  width:30px; height:30px; border-radius:6px;
+  display:flex; align-items:center; justify-content:center;
+  border:1px solid transparent; cursor:pointer; background:transparent;
+  font-size:14px; transition:.25s; opacity:.5;
+}
+.act-btn:hover { opacity:1; transform:scale(1.15); }
+.act-btn.del:hover { border-color:rgba(255,45,85,.4); color:var(--red); background:rgba(255,45,85,.08); }
+.act-btn.edit:hover { border-color:rgba(0,245,255,.4); color:var(--cyan); background:rgba(0,245,255,.08); }
+
+/* ─── EMPTY STATE ─── */
+#empty-state {
+  text-align:center; padding:60px 20px;
+  display:none;
+}
+#empty-state .empty-icon { font-size:52px; margin-bottom:16px; animation: float-idle2 3s ease-in-out infinite; }
+@keyframes float-idle2 { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+#empty-state p { font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:3px; color:rgba(200,232,240,.25); }
+
+/* ─── SECTION HEADERS ─── */
+.section-head {
+  font-family:'Orbitron',sans-serif;
+  font-size:9px; letter-spacing:4px; color:rgba(200,232,240,.3);
+  text-transform:uppercase; padding:0 0 8px;
+  border-bottom:1px solid rgba(0,245,255,.06);
+  margin:24px 0 14px;
+}
+
+/* ─── TOAST ─── */
+#toast {
+  position:fixed; bottom:30px; left:50%; transform:translateX(-50%) translateY(80px);
+  background:rgba(0,20,30,.95); border:1px solid var(--cyan);
+  color:var(--cyan); font-family:'Orbitron',sans-serif;
+  font-size:10px; letter-spacing:2px; padding:12px 24px;
+  border-radius:6px; z-index:9999; pointer-events:none;
+  box-shadow:0 0 24px rgba(0,245,255,.3);
+  transition: transform .4s cubic-bezier(.4,0,.2,1), opacity .4s;
+  opacity:0;
+}
+#toast.show { transform:translateX(-50%) translateY(0); opacity:1; }
+
+/* ─── EDIT MODAL ─── */
+.modal-overlay {
+  position:fixed; inset:0; z-index:8888;
+  background:rgba(4,10,20,.85); backdrop-filter:blur(6px);
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none; transition: opacity .3s;
+}
+.modal-overlay.open { opacity:1; pointer-events:all; }
+.modal {
+  background:#0a1622; border:1px solid var(--border);
+  border-radius:14px; padding:30px; width:min(480px,92vw);
+  box-shadow:0 0 60px rgba(0,245,255,.15);
+  transform:scale(.9); transition: transform .3s;
+  position:relative; overflow:hidden;
+}
+.modal-overlay.open .modal { transform:scale(1); }
+.modal::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+}
+.modal h3 {
+  font-family:'Orbitron',sans-serif; font-size:12px; letter-spacing:3px;
+  color:var(--cyan); margin-bottom:20px; text-transform:uppercase;
+}
+.modal .input-row, .modal .meta-row { margin-bottom:14px; }
+.modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+
+/* ─── FOOTER ─── */
+.footer {
+  text-align:center; margin-top:60px;
+  font-family:'Orbitron',sans-serif;
+  font-size:8px; letter-spacing:3px; color:rgba(200,232,240,.15);
+  padding-bottom:20px;
+}
+
+/* ─── SCROLLBAR ─── */
+::-webkit-scrollbar { width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(0,245,255,.2); border-radius:3px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(0,245,255,.4); }
+
+/* ─── RESPONSVE ─── */
+@media (max-width:520px) {
+  .meta-row { flex-direction:column; align-items:stretch; }
+  .filter-row { gap:6px; }
+  .search-wrap { margin-left:0; }
+  .search-wrap input { width:100%; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="stars"></canvas>
+<div id="cursor">
+  <div class="cursor-ring" id="c-ring"></div>
+  <div class="cursor-ring" id="c-dot"></div>
+</div>
+
+<div class="page">
+
+  <!-- HERO -->
+  <header class="hero" id="hero">
+    <span class="hero-tag">▸ NEXUS TASK INTERFACE v2.0 ◂</span>
+    <h1>NEXUS</h1>
+    <p class="hero-sub">Mission Control for Your Day</p>
+  </header>
+
+  <!-- STATS -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-chip t-cyan">  <span class="val" id="s-total">0</span> TOTAL</div>
+    <div class="stat-chip t-green"> <span class="val" id="s-done">0</span>  DONE</div>
+    <div class="stat-chip t-red">   <span class="val" id="s-active">0</span> ACTIVE</div>
+    <div class="stat-chip t-yellow"><span class="val" id="s-overdue">0</span> OVERDUE</div>
+  </div>
+
+  <!-- PROGRESS -->
+  <div class="progress-wrap" id="prog-wrap">
+    <div class="progress-label">
+      <span>MISSION PROGRESS</span>
+      <span id="prog-pct">0%</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="prog-fill" style="width:0%"></div></div>
+  </div>
+
+  <!-- INPUT PANEL -->
+  <div class="input-panel" id="input-panel">
+    <div class="input-row">
+      <input type="text" id="task-input" placeholder="Enter new mission objective…"/>
+      <button class="btn btn-add" onclick="addTask()">+ ADD</button>
+    </div>
+    <div class="meta-row">
+      <select id="task-cat">
+        <option value="general">⬡ General</option>
+        <option value="work">⬡ Work</option>
+        <option value="personal">⬡ Personal</option>
+        <option value="health">⬡ Health</option>
+        <option value="urgent">⬡ Urgent</option>
+      </select>
+      <select id="task-pri">
+        <option value="medium">◈ Medium</option>
+        <option value="high">◈ High</option>
+        <option value="low">◈ Low</option>
+      </select>
+      <input type="date" id="task-due"/>
+      <button class="btn btn-clear" onclick="clearDone()">⌫ CLEAR DONE</button>
+    </div>
+  </div>
+
+  <!-- FILTERS -->
+  <div class="filter-row" id="filter-row">
+    <button class="filter-btn active" data-filter="all"    onclick="setFilter('all',this)">ALL</button>
+    <button class="filter-btn"        data-filter="active" onclick="setFilter('active',this)">ACTIVE</button>
+    <button class="filter-btn"        data-filter="done"   onclick="setFilter('done',this)">DONE</button>
+    <button class="filter-btn"        data-filter="high"   onclick="setFilter('high',this)">HIGH PRIORITY</button>
+    <div class="search-wrap">
+      <span class="ico">⌕</span>
+      <input type="text" id="search-input" placeholder="Search…" oninput="render()"/>
+    </div>
+  </div>
+
+  <!-- TASK LIST -->
+  <ul id="task-list"></ul>
+  <div id="empty-state">
+    <div class="empty-icon">⬡</div>
+    <p>No missions found. Add one above.</p>
+  </div>
+
+  <div class="footer">NEXUS © 2077 — CLASSIFIED INTERFACE</div>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal">
+    <h3>⬡ Edit Mission</h3>
+    <div class="input-row">
+      <input type="text" id="edit-text" placeholder="Task text…" style="width:100%"/>
+    </div>
+    <div class="meta-row">
+      <select id="edit-cat">
+        <option value="general">⬡ General</option>
+        <option value="work">⬡ Work</option>
+        <option value="personal">⬡ Personal</option>
+        <option value="health">⬡ Health</option>
+        <option value="urgent">⬡ Urgent</option>
+      </select>
+      <select id="edit-pri">
+        <option value="medium">◈ Medium</option>
+        <option value="high">◈ High</option>
+        <option value="low">◈ Low</option>
+      </select>
+      <input type="date" id="edit-due"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-clear" onclick="closeModal()">CANCEL</button>
+      <button class="btn btn-add"   onclick="saveEdit()">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast">MISSION LOGGED</div>
+
+<script>
+/* ─── STATE ─── */
+let tasks = JSON.parse(localStorage.getItem('nx_tasks')) || [];
+let filter = 'all';
+let editIdx = -1;
+
+/* ─── SAVE ─── */
+function save() { localStorage.setItem('nx_tasks', JSON.stringify(tasks)); render(); }
+
+/* ─── ADD ─── */
+function addTask() {
+  const inp = document.getElementById('task-input');
+  const text = inp.value.trim();
+  if (!text) { inp.focus(); shakeEl(inp); return; }
+
+  tasks.unshift({
+    id: Date.now(),
+    text,
+    done: false,
+    cat: document.getElementById('task-cat').value,
+    pri: document.getElementById('task-pri').value,
+    due: document.getElementById('task-due').value,
+    created: new Date().toISOString()
+  });
+  inp.value = '';
+  document.getElementById('task-due').value = '';
+  save();
+  toast('MISSION LOGGED');
+}
+
+/* ─── DELETE ─── */
+function deleteTask(id) {
+  const li = document.querySelector(`[data-id="${id}"]`);
+  if (li) {
+    li.style.opacity = '0';
+    li.style.transform = 'translateX(60px) scale(.9)';
+    li.style.transition = 'all .35s ease';
+    setTimeout(()=>{ tasks = tasks.filter(t=>t.id!==id); save(); }, 340);
+  }
+}
+
+/* ─── TOGGLE ─── */
+function toggleTask(id) {
+  const t = tasks.find(t=>t.id===id);
+  if (t) { t.done = !t.done; save(); }
+}
+
+/* ─── CLEAR DONE ─── */
+function clearDone() { tasks = tasks.filter(t=>!t.done); save(); toast('COMPLETED MISSIONS CLEARED'); }
+
+/* ─── FILTER ─── */
+function setFilter(f, btn) {
+  filter = f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  render();
+}
+
+/* ─── EDIT ─── */
+function openEdit(id) {
+  const t = tasks.find(t=>t.id===id);
+  if (!t) return;
+  editIdx = id;
+  document.getElementById('edit-text').value = t.text;
+  document.getElementById('edit-cat').value  = t.cat;
+  document.getElementById('edit-pri').value  = t.pri;
+  document.getElementById('edit-due').value  = t.due || '';
+  document.getElementById('modal-overlay').classList.add('open');
+}
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-overlay'))
+    document.getElementById('modal-overlay').classList.remove('open');
+}
+function saveEdit() {
+  const t = tasks.find(t=>t.id===editIdx);
+  if (!t) return;
+  t.text = document.getElementById('edit-text').value.trim() || t.text;
+  t.cat  = document.getElementById('edit-cat').value;
+  t.pri  = document.getElementById('edit-pri').value;
+  t.due  = document.getElementById('edit-due').value;
+  document.getElementById('modal-overlay').classList.remove('open');
+  save(); toast('MISSION UPDATED');
+}
+
+/* ─── TOAST ─── */
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), 2200);
+}
+
+/* ─── SHAKE ─── */
+function shakeEl(el) {
+  el.style.animation='none';
+  el.style.borderColor='var(--red)';
+  el.style.boxShadow='0 0 16px rgba(255,45,85,.5)';
+  setTimeout(()=>{ el.style.borderColor=''; el.style.boxShadow=''; },500);
+}
+
+/* ─── OVERDUE ─── */
+function isOverdue(t) {
+  if (!t.due || t.done) return false;
+  return new Date(t.due) < new Date(new Date().toDateString());
+}
+
+/* ─── RENDER ─── */
+function render() {
+  const search = document.getElementById('search-input').value.toLowerCase();
+  const list   = document.getElementById('task-list');
+  const empty  = document.getElementById('empty-state');
+
+  let filtered = tasks.filter(t => {
+    if (filter==='active' && t.done)  return false;
+    if (filter==='done'   && !t.done) return false;
+    if (filter==='high'   && t.pri!=='high') return false;
+    if (search && !t.text.toLowerCase().includes(search)) return false;
+    return true;
+  });
+
+  // Prioritize: undone high first, then medium, then low, then done
+  filtered.sort((a,b)=>{
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const po = {high:0,medium:1,low:2};
+    return (po[a.pri]||1) - (po[b.pri]||1);
+  });
+
+  // Stats
+  const total   = tasks.length;
+  const done    = tasks.filter(t=>t.done).length;
+  const active  = total - done;
+  const overdue = tasks.filter(isOverdue).length;
+  document.getElementById('s-total').textContent   = total;
+  document.getElementById('s-done').textContent    = done;
+  document.getElementById('s-active').textContent  = active;
+  document.getElementById('s-overdue').textContent = overdue;
+
+  const pct = total ? Math.round((done/total)*100) : 0;
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-pct').textContent  = pct + '%';
+
+  list.innerHTML = '';
+
+  if (!filtered.length) {
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  filtered.forEach((t, idx) => {
+    const li = document.createElement('li');
+    li.className = `task-item p-${t.pri}`;
+    li.dataset.id = t.id;
+    li.style.animationDelay = (idx * .08) + 's';
+
+    const dueStr = t.due
+      ? `<span class="badge badge-due${isOverdue(t) ? ' overdue':''}">${isOverdue(t)?'⚠ ':''}${t.due}</span>` : '';
+
+    const catLabels = {general:'⬡ General',work:'⬡ Work',personal:'⬡ Personal',health:'⬡ Health',urgent:'⬡ Urgent'};
+
+    li.innerHTML = `
+      <div class="task-check ${t.done?'checked':''}" onclick="toggleTask(${t.id})">
+        ${t.done ? '✓' : ''}
+      </div>
+      <div class="task-body">
+        <div class="task-text ${t.done?'done':''}">${escHtml(t.text)}</div>
+        <div class="task-meta">
+          <span class="badge badge-cat">${catLabels[t.cat]||t.cat}</span>
+          <span class="badge badge-pri ${t.pri}">${t.pri.toUpperCase()}</span>
+          ${dueStr}
+        </div>
+      </div>
+      <div class="task-actions">
+        <button class="act-btn edit" title="Edit" onclick="openEdit(${t.id})">✎</button>
+        <button class="act-btn del"  title="Delete" onclick="deleteTask(${t.id})">✕</button>
+      </div>`;
+
+    list.appendChild(li);
+
+    // Staggered reveal
+    requestAnimationFrame(()=>{
+      setTimeout(()=>li.classList.add('revealed'), idx * 70);
+    });
+  });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ─── KEYBOARD ─── */
+document.getElementById('task-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addTask();
+});
+
+/* ─── SCROLL REVEAL ─── */
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+
+['hero','stats-bar','prog-wrap','input-panel','filter-row'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) io.observe(el);
+});
+
+/* ─── STAR FIELD ─── */
+(function initStars(){
+  const c = document.getElementById('stars');
+  const ctx = c.getContext('2d');
+  let W, H, stars=[];
+
+  function resize(){
+    W = c.width  = window.innerWidth;
+    H = c.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  for(let i=0;i<200;i++) stars.push({
+    x: Math.random()*W,
+    y: Math.random()*H,
+    r: Math.random()*1.2+.2,
+    a: Math.random(),
+    spd: .0003 + Math.random()*.0006,
+    drift: (Math.random()-.5)*.06
+  });
+
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    stars.forEach(s=>{
+      s.a += s.spd;
+      s.x += s.drift;
+      if(s.x < 0) s.x = W;
+      if(s.x > W) s.x = 0;
+      const alpha = .3 + .7*Math.abs(Math.sin(s.a));
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(0,245,255,${alpha})`;
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ─── CUSTOM CURSOR ─── */
+(function initCursor(){
+  const dot  = document.getElementById('c-dot');
+  const ring = document.getElementById('c-ring');
+  let rx=0, ry=0, mx=0, my=0;
+
+  document.addEventListener('mousemove', e=>{
+    mx = e.clientX; my = e.clientY;
+    dot.style.left  = mx + 'px';
+    dot.style.top   = my + 'px';
+  });
+
+  function animRing(){
+    rx += (mx - rx) * .12;
+    ry += (my - ry) * .12;
+    ring.style.left = rx + 'px';
+    ring.style.top  = ry + 'px';
+    requestAnimationFrame(animRing);
+  }
+  animRing();
+
+  document.addEventListener('mousedown', ()=>{
+    ring.style.width  = '20px'; ring.style.height = '20px';
+  });
+  document.addEventListener('mouseup', ()=>{
+    ring.style.width  = '32px'; ring.style.height = '32px';
+  });
+
+  const hoverEls = ()=> document.querySelectorAll('button, a, input, select, .task-item, .filter-btn, .task-check, .act-btn');
+  document.addEventListener('mouseover', e=>{
+    if([...hoverEls()].some(el=>el.contains(e.target))){
+      ring.style.width='44px'; ring.style.height='44px';
+      ring.style.borderColor='var(--purple)';
+    }
+  });
+  document.addEventListener('mouseout', e=>{
+    if([...hoverEls()].some(el=>el.contains(e.target))){
+      ring.style.width='32px'; ring.style.height='32px';
+      ring.style.borderColor='var(--cyan)';
+    }
+  });
+})();
+
+/* ─── INIT ─── */
+render();
+// Show hero immediately
+setTimeout(()=> document.getElementById('hero').classList.add('visible'), 50);
+setTimeout(()=> document.getElementById('stats-bar').classList.add('visible'), 200);
+setTimeout(()=> document.getElementById('prog-wrap').classList.add('visible'), 350);
+setTimeout(()=> document.getElementById('input-panel').classList.add('visible'), 450);
+setTimeout(()=> document.getElementById('filter-row').classList.add('visible'), 550);
+</script>
+</body>
+</html>
