@@ -6,7 +6,6 @@
 <title>NEXUS — Command System</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
-/* ═══════════════ CORE VARIABLES ═══════════════ */
 :root {
   --cyan:    #00f5ff;
   --purple:  #b400ff;
@@ -38,7 +37,6 @@ body {
   overflow-x:hidden;
 }
 
-/* ═══════════════ GLOBAL BACKGROUNDS ═══════════════ */
 #star-canvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
 .scanlines {
   position:fixed; inset:0; z-index:1; pointer-events:none;
@@ -52,16 +50,13 @@ body {
   background-size:60px 60px;
 }
 
-/* ═══════════════ CUSTOM CURSOR ═══════════════ */
 body { cursor:none; }
 #cursor { position:fixed; top:0; left:0; z-index:9999; pointer-events:none; }
 #c-dot  { position:absolute; width:8px; height:8px; background:var(--cyan); border-radius:50%; transform:translate(-50%,-50%); }
 #c-ring { position:absolute; width:32px; height:32px; border:1.5px solid var(--cyan); border-radius:50%; transform:translate(-50%,-50%); transition:width .3s,height .3s,border-color .3s; }
 
-/* ═══════════════ APP SHELL ═══════════════ */
 #app { position:relative; z-index:2; min-height:100vh; }
 
-/* ═══════════════ AUTH PAGES ═══════════════ */
 .auth-page {
   min-height:100vh;
   display:flex; align-items:center; justify-content:center;
@@ -147,7 +142,6 @@ body { cursor:none; }
   margin-bottom:14px; display:none;
 }
 
-/* ═══════════════ BUTTONS ═══════════════ */
 .btn {
   font-family:'Orbitron',sans-serif;
   font-size:10px; letter-spacing:2px;
@@ -185,7 +179,6 @@ body { cursor:none; }
 .btn-outline  { background:transparent; color:var(--text2); border-color:rgba(0,245,255,.15); }
 .btn-outline:hover  { border-color:var(--cyan); color:var(--cyan); }
 
-/* ═══════════════ DASHBOARD LAYOUT ═══════════════ */
 .dashboard {
   display:flex; min-height:100vh;
 }
@@ -274,7 +267,6 @@ body { cursor:none; }
 .user-name { font-size:13px; font-weight:700; color:var(--cyan); truncate; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .user-role { font-family:'Orbitron',sans-serif; font-size:7px; letter-spacing:2px; color:var(--text2); }
 
-/* MAIN CONTENT */
 .main-content {
   margin-left:var(--sidebar);
   flex:1; padding:0;
@@ -322,7 +314,6 @@ body { cursor:none; }
 .logout-btn:hover { background:rgba(255,45,85,.18); border-color:var(--red); }
 .page-content { flex:1; padding:28px; overflow-y:auto; }
 
-/* ═══════════════ STAT CARDS ═══════════════ */
 .stats-grid {
   display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
   gap:14px; margin-bottom:28px;
