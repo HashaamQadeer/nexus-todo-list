@@ -66,9 +66,6 @@ function migrateLegacyCollab(collab, users) {
   const base = { ...createEmptyCollab(), ...(collab || {}) };
   if (base.teams.length || base.teamTasks.length || base.teamChats.length) return base;
   const firstManager = users.find((u) => normalizeRole(u.role) === "manager");
-  const seedMembers = users
-    .filter((u) => u.status === "active" && normalizeRole(u.role) !== "admin")
-    .map((u) => u.id);
   const teamId = "team-general";
   base.teams = [
     {
@@ -83,13 +80,17 @@ function migrateLegacyCollab(collab, users) {
     { id: "tr-manager", teamId, name: "Manager", permissions: ["manage_members", "manage_roles", "manage_tasks", "chat"] },
     { id: "tr-member", teamId, name: "Member", permissions: ["chat", "view_tasks", "comment_tasks"] }
   ];
-  base.teamMemberships = seedMembers.map((uid) => ({
-    id: `${teamId}:${uid}`,
-    teamId,
-    userId: uid,
-    teamRoleId: uid === (firstManager ? firstManager.id : "") ? "tr-manager" : "tr-member",
-    created: new Date().toISOString()
-  }));
+  base.teamMemberships = firstManager
+    ? [
+        {
+          id: `${teamId}:${firstManager.id}`,
+          teamId,
+          userId: firstManager.id,
+          teamRoleId: "tr-manager",
+          created: new Date().toISOString()
+        }
+      ]
+    : [];
   base.teamTasks = Array.isArray(base.tasks)
     ? base.tasks.map((t) => ({ ...t, teamId: t.teamId || teamId }))
     : [];
@@ -192,34 +193,53 @@ async function loadState() {
   };
 }
 
-function normalizeCollabForPersist(collab, authUser) {
+function normalizeCollabForPersist(collab, authUser, currentCollab) {
+  const actorRole = normalizeRole(authUser.role);
   const next = migrateLegacyCollab(collab, []);
-  const teams = Array.isArray(next.teams) ? next.teams : [];
-  const teamById = new Map(teams.map((t) => [t.id, t]));
-  const allowedTeamIds =
-    normalizeRole(authUser.role) === "admin"
-      ? new Set(teams.map((t) => t.id))
-      : new Set(teams.filter((t) => t.managerId === authUser.id).map((t) => t.id));
-  const safeTeams = teams.filter((t) => {
-    if (normalizeRole(authUser.role) === "admin") return true;
-    return t.managerId === authUser.id || allowedTeamIds.has(t.id);
+  const current = migrateLegacyCollab(currentCollab, []);
+  if (actorRole === "admin") {
+    const out = { ...createEmptyCollab(), ...next };
+    out.tasks = Array.isArray(out.teamTasks) ? out.teamTasks : [];
+    out.chat = Array.isArray(out.teamChats) ? out.teamChats : [];
+    return out;
+  }
+
+  const currentTeams = Array.isArray(current.teams) ? current.teams : [];
+  const nextTeams = Array.isArray(next.teams) ? next.teams : [];
+  const nextTeamsById = new Map(nextTeams.map((t) => [t.id, t]));
+  const managedTeamIds = new Set(currentTeams.filter((t) => t.managerId === authUser.id).map((t) => t.id));
+
+  const mergedTeams = currentTeams.map((t) => {
+    if (!managedTeamIds.has(t.id)) return t;
+    const incoming = nextTeamsById.get(t.id);
+    if (!incoming) return t;
+    return {
+      ...t,
+      name: incoming.name || t.name,
+      department: incoming.department || ""
+    };
   });
-  const safeIds = new Set(safeTeams.map((t) => t.id));
-  const safeRoles = (Array.isArray(next.teamRoles) ? next.teamRoles : []).filter((r) => safeIds.has(r.teamId));
-  const safeMemberships = (Array.isArray(next.teamMemberships) ? next.teamMemberships : []).filter((m) => safeIds.has(m.teamId));
-  const safeTasks = (Array.isArray(next.teamTasks) ? next.teamTasks : []).filter((t) => safeIds.has(t.teamId));
-  const safeChats = (Array.isArray(next.teamChats) ? next.teamChats : []).filter((m) => safeIds.has(m.teamId));
-  return {
-    ...createEmptyCollab(),
-    ...next,
-    teams: safeTeams,
-    teamRoles: safeRoles,
-    teamMemberships: safeMemberships,
-    teamTasks: safeTasks,
-    teamChats: safeChats,
-    tasks: safeTasks,
-    chat: safeChats
+
+  const keepOrManaged = (arrCurrent, arrNext, key = "teamId") => {
+    const c = Array.isArray(arrCurrent) ? arrCurrent : [];
+    const n = Array.isArray(arrNext) ? arrNext : [];
+    return c.filter((x) => !managedTeamIds.has(x[key])).concat(n.filter((x) => managedTeamIds.has(x[key])));
   };
+
+  const out = {
+    ...createEmptyCollab(),
+    ...current,
+    activity: Array.isArray(next.activity) ? next.activity : current.activity || [],
+    announcements: Array.isArray(next.announcements) ? next.announcements : current.announcements || [],
+    teams: mergedTeams,
+    teamRoles: keepOrManaged(current.teamRoles, next.teamRoles),
+    teamMemberships: keepOrManaged(current.teamMemberships, next.teamMemberships),
+    teamTasks: keepOrManaged(current.teamTasks, next.teamTasks),
+    teamChats: keepOrManaged(current.teamChats, next.teamChats)
+  };
+  out.tasks = out.teamTasks;
+  out.chat = out.teamChats;
+  return out;
 }
 
 async function saveState(input, authUser) {
@@ -261,7 +281,8 @@ async function saveState(input, authUser) {
     }
   }
 
-  const persistedCollab = normalizeCollabForPersist(input.collab, authUser);
+  const stateDoc = await AppState.findOne({ id: "global" }).lean();
+  const persistedCollab = normalizeCollabForPersist(input.collab, authUser, stateDoc?.collab || createEmptyCollab());
 
   await AppState.updateOne(
     { id: "global" },

@@ -26,9 +26,9 @@ function migrateCollabShape(collab) {
       { id: 'tr-manager', teamId, name: 'Manager', permissions: ['manage_members', 'manage_roles', 'manage_tasks', 'chat'] },
       { id: 'tr-member', teamId, name: 'Member', permissions: ['chat', 'view_tasks', 'comment_tasks'] }
     ];
-    next.teamMemberships = DB.users
-      .filter(u => u.id !== ADMIN_ID && u.status === 'active')
-      .map(u => ({ id: `${teamId}:${u.id}`, teamId, userId: u.id, teamRoleId: u.id === (manager ? manager.id : '') ? 'tr-manager' : 'tr-member', created: new Date().toISOString() }));
+    next.teamMemberships = manager
+      ? [{ id: `${teamId}:${manager.id}`, teamId, userId: manager.id, teamRoleId: 'tr-manager', created: new Date().toISOString() }]
+      : [];
   }
   if (!next.teamTasks.length && Array.isArray(next.tasks)) next.teamTasks = next.tasks.map(t => ({ ...t, teamId: t.teamId || next.teams[0].id }));
   if (!next.teamChats.length && Array.isArray(next.chat)) next.teamChats = next.chat.map(m => ({ ...m, teamId: m.teamId || next.teams[0].id, channelType: m.channelType || 'group' }));

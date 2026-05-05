@@ -17,10 +17,16 @@ function setCurrentTeamId(id) {
   APP_STATE.teamPrefs = prefs;
 }
 
+function accessibleTeamIdsForUser(userId) {
+  const managed = teams().filter(t => t.managerId === userId).map(t => t.id);
+  const memberOf = userTeamMemberships(userId).map(m => m.teamId);
+  return [...new Set(memberOf.concat(managed))];
+}
+
 function currentTeamId() {
   const u = currentUser();
   if (!u) return null;
-  const memberships = userTeamMemberships(u.id).map(m => m.teamId);
+  const memberships = accessibleTeamIdsForUser(u.id);
   if (!memberships.length) return null;
   const pref = getTeamPrefs()[u.id];
   if (pref && memberships.includes(pref)) return pref;
@@ -86,7 +92,7 @@ function canAccessTeam(teamId, userId) {
   const u = getUser(userId);
   if (!u || u.status !== 'active') return false;
   if (normalizeRole(u.role) === 'admin') return true;
-  return userTeamMemberships(userId).some(m => m.teamId === teamId);
+  return accessibleTeamIdsForUser(userId).includes(teamId);
 }
 function teamById(id) {
   return teams().find(t => t.id === id);
@@ -276,6 +282,10 @@ function wsCreateTeamTaskWithFiles() {
   if (!title) return toast('Title required', 'err');
   const assignees = [...document.querySelectorAll('.wt-assign:checked')].map(x => x.value);
   if (!assignees.length) return toast('Select at least one assignee', 'err');
+  const memberIds = new Set(teamMemberships().filter(m => m.teamId === tid).map(m => m.userId));
+  if (assignees.some(id => !memberIds.has(id))) {
+    return toast('Assignees must be members of this team', 'err');
+  }
   const task = {
     id: 'wt-' + Date.now(),
     teamId: tid,
@@ -316,7 +326,17 @@ function renderManagerAssignForm() {
   const tid = currentTeamId();
   const people = assignableUsers(tid).filter(x => x.id !== u.id);
   if (!canManageTeam(tid, u.id)) return `<div class="panel"><div class="panel-body"><p class="text-muted">Only the team manager can assign tasks in this team.</p></div></div>`;
-  return `${renderTeamSwitcher()}<div class="panel"><div class="panel-head"><h3>Create Team Task</h3></div><div class="panel-body"><input type="text" class="input-field" id="wt-title" placeholder="Task title"/><div id="wt-desc" class="wysiwyg-editor input-field mt-8" contenteditable="true" data-placeholder="Details..."></div><div class="mt-8"><input type="date" class="input-field" id="wt-deadline"/></div><div class="mt-8"><select class="input-field" id="wt-priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div><div class="mt-16"><div class="section-head">Assignees</div>${people.map(p => `<label style="display:block"><input type="checkbox" class="wt-assign" value="${p.id}"/> ${escHtml(p.username)}</label>`).join('')}</div><button class="btn-sm btn-info mt-16" onclick="wsCreateTeamTaskWithFiles()">CREATE</button></div></div>`;
+  return `${renderTeamSwitcher()}<div class="panel"><div class="panel-head"><h3>Assign Work (Team members only)</h3><span class="text-muted" style="font-size:12px">${people.length} members available</span></div><div class="panel-body"><input type="text" class="input-field" id="wt-title" placeholder="Task title"/><div id="wt-desc" class="wysiwyg-editor input-field mt-8" contenteditable="true" data-placeholder="Task details, acceptance criteria, dependencies..."></div><div class="form-inline mt-8"><input type="date" class="input-field" id="wt-deadline"/><select class="input-field" id="wt-priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div><div class="mt-16"><div class="section-head">Assignees</div><input class="input-field mb-8" id="assign-member-search" placeholder="Search team members..." oninput="wsFilterAssigneeList(this.value)"/><div id="assign-member-list">${people.map(p => `<label style="display:block"><input type="checkbox" class="wt-assign" value="${p.id}"/> ${escHtml(p.username)} <span class="text-muted">(${escHtml(p.email || '')})</span></label>`).join('') || '<p class="text-muted">No members in this team. Add members in Team Access tab.</p>'}</div></div><button class="btn-sm btn-info mt-16" onclick="wsCreateTeamTaskWithFiles()">CREATE TASK</button></div></div>`;
+}
+function wsFilterAssigneeList(query) {
+  const q = String(query || '').trim().toLowerCase();
+  const tid = currentTeamId();
+  const u = currentUser();
+  const people = assignableUsers(tid).filter(x => x.id !== u.id);
+  const filtered = q ? people.filter(p => `${p.username} ${p.email || ''}`.toLowerCase().includes(q)) : people;
+  const el = document.getElementById('assign-member-list');
+  if (!el) return;
+  el.innerHTML = filtered.map(p => `<label style="display:block"><input type="checkbox" class="wt-assign" value="${p.id}"/> ${escHtml(p.username)} <span class="text-muted">(${escHtml(p.email || '')})</span></label>`).join('') || '<p class="text-muted">No matching member.</p>';
 }
 function renderManagerBoard(u) {
   const tid = currentTeamId();
@@ -403,9 +423,40 @@ function renderManagerTeamPanel() {
   const memberRows = members.map(m => {
     const uu = getUser(m.userId);
     if (!uu) return '';
-    return `<tr><td>${escHtml(uu.username)}</td><td>${escHtml(uu.email)}</td><td><select class="role-select" onchange="wsSetMemberRole('${m.id}',this.value)">${roles.map(r => `<option value="${r.id}" ${m.teamRoleId === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}</select></td></tr>`;
+    return `<tr><td>${escHtml(uu.username)}</td><td>${escHtml(uu.email)}</td><td><select class="role-select" onchange="wsSetMemberRole('${m.id}',this.value)">${roles.map(r => `<option value="${r.id}" ${m.teamRoleId === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}</select></td><td><button class="btn-sm btn-delete" onclick="wsRemoveMemberFromTeam('${m.id}')">REMOVE</button></td></tr>`;
   }).join('');
-  return `${renderTeamSwitcher()}<div class="panel"><div class="panel-head"><h3>Team Roles & Access</h3></div><div class="panel-body"><div class="form-inline"><input class="input-field" id="team-role-name" placeholder="New role name"/><button class="btn-sm btn-info" onclick="wsCreateTeamRole()">CREATE ROLE</button></div><div class="mt-12"><table class="data-table"><thead><tr><th>Member</th><th>Email</th><th>Team Role</th></tr></thead><tbody>${memberRows || '<tr><td colspan="3">No members</td></tr>'}</tbody></table></div><div class="mt-12"><div class="form-inline"><select id="team-add-user" class="input-field">${DB.users.filter(x => x.status === 'active' && x.id !== ADMIN_ID && !members.some(m => m.userId === x.id)).map(x => `<option value="${x.id}">${escHtml(x.username)}</option>`).join('')}</select><select id="team-add-role" class="input-field">${roles.map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('')}</select><button class="btn-sm btn-purple" onclick="wsAddMemberToTeam()">ADD MEMBER</button></div></div></div></div>`;
+  const t = teamById(tid);
+  return `${renderTeamSwitcher()}<div class="panel"><div class="panel-head"><h3>Team Access & Roles</h3></div><div class="panel-body"><div class="form-inline"><input class="input-field" id="team-name-edit" value="${escHtml(t ? t.name : '')}" placeholder="Team name"/><button class="btn-sm btn-info" onclick="wsRenameTeam()">SAVE TEAM NAME</button></div><div class="form-inline mt-12"><input class="input-field" id="team-role-name" placeholder="Create new team role"/><button class="btn-sm btn-info" onclick="wsCreateTeamRole()">CREATE ROLE</button></div><div class="mt-12"><div class="section-head">Add member to team</div><input class="input-field mb-8" id="team-member-search" placeholder="Search user by name/email..." oninput="wsRenderMemberCandidates(this.value)"/><div id="team-member-candidates"><p class="text-muted">Search to find users.</p></div><div class="form-inline mt-8"><select id="team-add-role" class="input-field">${roles.map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('')}</select><button class="btn-sm btn-purple" onclick="wsAddMemberToTeam()">ADD SELECTED MEMBER</button></div></div><div class="mt-16"><table class="data-table"><thead><tr><th>Member</th><th>Email</th><th>Team Role</th><th>Action</th></tr></thead><tbody>${memberRows || '<tr><td colspan="4">No members</td></tr>'}</tbody></table></div></div></div>`;
+}
+function wsRenameTeam() {
+  const u = currentUser();
+  const tid = currentTeamId();
+  if (!isTeamManager(tid, u.id)) return;
+  const name = ((document.getElementById('team-name-edit') || {}).value || '').trim();
+  if (!name) return toast('Team name required', 'err');
+  const list = teams();
+  const i = list.findIndex(t => t.id === tid);
+  if (i < 0) return;
+  list[i].name = name;
+  saveTeams(list);
+  pushStateToServer();
+  toast('Team name updated');
+}
+let selectedCandidateUserId = '';
+function wsRenderMemberCandidates(query = '') {
+  const tid = currentTeamId();
+  const q = String(query || '').trim().toLowerCase();
+  const members = teamMemberships().filter(m => m.teamId === tid).map(m => m.userId);
+  const candidates = DB.users.filter(x => x.status === 'active' && x.id !== ADMIN_ID && !members.includes(x.id));
+  const el = document.getElementById('team-member-candidates');
+  if (!el) return;
+  if (!q) {
+    el.innerHTML = '<p class="text-muted">Search to find users.</p>';
+    selectedCandidateUserId = '';
+    return;
+  }
+  const filtered = candidates.filter(x => `${x.username} ${x.email || ''}`.toLowerCase().includes(q));
+  el.innerHTML = filtered.map(x => `<label style="display:block"><input type="radio" name="team-candidate" value="${x.id}" onclick="selectedCandidateUserId='${x.id}'"/> ${escHtml(x.username)} <span class="text-muted">(${escHtml(x.email || '')})</span></label>`).join('') || '<p class="text-muted">No matching user.</p>';
 }
 function wsCreateTeamRole() {
   const u = currentUser();
@@ -417,6 +468,7 @@ function wsCreateTeamRole() {
   const list = teamRoles();
   list.push({ id: `tr-${Date.now()}`, teamId: tid, name, permissions: ['chat', 'view_tasks', 'comment_tasks'] });
   saveTeamRoles(list);
+  pushStateToServer();
   input.value = '';
   navigate('manager', 'team');
 }
@@ -427,28 +479,72 @@ function wsSetMemberRole(membershipId, roleId) {
   if (i < 0 || !isTeamManager(list[i].teamId, u.id)) return;
   list[i].teamRoleId = roleId;
   saveTeamMemberships(list);
+  pushStateToServer();
 }
 function wsAddMemberToTeam() {
   const u = currentUser();
   const tid = currentTeamId();
   if (!isTeamManager(tid, u.id)) return;
-  const uid = (document.getElementById('team-add-user') || {}).value;
+  const uid = selectedCandidateUserId;
   const roleId = (document.getElementById('team-add-role') || {}).value;
   if (!uid || !roleId) return;
   const list = teamMemberships();
   if (list.some(m => m.teamId === tid && m.userId === uid)) return;
   list.push({ id: `${tid}:${uid}:${Date.now()}`, teamId: tid, userId: uid, teamRoleId: roleId, created: new Date().toISOString() });
   saveTeamMemberships(list);
+  pushStateToServer();
+  selectedCandidateUserId = '';
+  navigate('manager', 'team');
+}
+function wsRemoveMemberFromTeam(membershipId) {
+  const u = currentUser();
+  const list = teamMemberships();
+  const i = list.findIndex(m => m.id === membershipId);
+  if (i < 0) return;
+  const membership = list[i];
+  if (!isTeamManager(membership.teamId, u.id)) return;
+  if (!confirm('Remove this member from the team?')) return;
+
+  const userId = membership.userId;
+  const teamId = membership.teamId;
+
+  // Remove membership.
+  const nextMemberships = list.filter(m => m.id !== membershipId);
+  saveTeamMemberships(nextMemberships);
+
+  // Clean team tasks to remove orphan references.
+  const nextTasks = (APP_STATE.collab.teamTasks || []).map(t => {
+    if (t.teamId !== teamId) return t;
+    return {
+      ...t,
+      assignees: (t.assignees || []).filter(id => id !== userId),
+      taggedUserIds: (t.taggedUserIds || []).filter(id => id !== userId)
+    };
+  });
+  APP_STATE.collab.teamTasks = nextTasks;
+  APP_STATE.collab.tasks = nextTasks;
+
+  // Remove DMs in this team involving the removed user.
+  const nextChats = (APP_STATE.collab.teamChats || []).filter(c => {
+    if (c.teamId !== teamId) return true;
+    if ((c.channelType || 'group') !== 'dm') return true;
+    return c.fromUserId !== userId && c.toUserId !== userId;
+  });
+  saveTeamChats(nextChats);
+  pushStateToServer();
+
   navigate('manager', 'team');
 }
 
 function renderAdminTeamsHub() {
   const u = currentUser();
   if (!u || normalizeRole(u.role) !== 'admin') return '';
-  const rows = teams().map(t => `<tr><td>${escHtml(t.name)}</td><td>${escHtml(t.department || '—')}</td><td>${escHtml((getUser(t.managerId) || {}).username || 'Unassigned')}</td><td><select class="role-select" onchange="wsSetTeamManager('${t.id}',this.value)"><option value="">Unassigned</option>${DB.users.filter(x => normalizeRole(x.role) === 'manager' && x.status === 'active').map(m => `<option value="${m.id}" ${t.managerId === m.id ? 'selected' : ''}>${escHtml(m.username)}</option>`).join('')}</select></td></tr>`).join('');
-  return `<div class="panel"><div class="panel-head"><h3>Teams</h3></div><div class="panel-body"><div class="form-inline"><input id="new-team-name" class="input-field" placeholder="Team name"/><input id="new-team-dept" class="input-field" placeholder="Department (optional)"/><select id="new-team-manager" class="input-field"><option value="">Select manager</option>${DB.users.filter(x => normalizeRole(x.role) === 'manager' && x.status === 'active').map(m => `<option value="${m.id}">${escHtml(m.username)}</option>`).join('')}</select><button class="btn-sm btn-info" onclick="wsCreateTeam()">CREATE TEAM</button></div><div class="mt-12"><table class="data-table"><thead><tr><th>Team</th><th>Department</th><th>Owner</th><th>Set Manager</th></tr></thead><tbody>${rows || '<tr><td colspan="4">No teams</td></tr>'}</tbody></table></div></div></div>`;
+  const rows = teams().map(t => `<tr><td>${escHtml(t.name)}</td><td>${escHtml(t.department || '—')}</td><td>${escHtml((getUser(t.managerId) || {}).username || 'Unassigned')}</td><td><select class="role-select" onchange="wsSetTeamManager('${t.id}',this.value)"><option value="">Unassigned</option>${DB.users.filter(x => normalizeRole(x.role) === 'manager' && x.status === 'active').map(m => `<option value="${m.id}" ${t.managerId === m.id ? 'selected' : ''}>${escHtml(m.username)}</option>`).join('')}</select></td><td><button class="btn-sm btn-delete" onclick="wsDeleteTeam('${t.id}')">DELETE</button></td></tr>`).join('');
+  return `<div class="panel"><div class="panel-head"><h3>Teams (Admin only)</h3></div><div class="panel-body"><div class="form-inline"><input id="new-team-name" class="input-field" placeholder="Team name"/><input id="new-team-dept" class="input-field" placeholder="Department (optional)"/><select id="new-team-manager" class="input-field"><option value="">Select manager</option>${DB.users.filter(x => normalizeRole(x.role) === 'manager' && x.status === 'active').map(m => `<option value="${m.id}">${escHtml(m.username)}</option>`).join('')}</select><button class="btn-sm btn-info" onclick="wsCreateTeam()">CREATE TEAM</button></div><div class="mt-12"><table class="data-table"><thead><tr><th>Team</th><th>Department</th><th>Owner</th><th>Set Manager</th><th>Action</th></tr></thead><tbody>${rows || '<tr><td colspan="5">No teams</td></tr>'}</tbody></table></div></div></div>`;
 }
 function wsCreateTeam() {
+  const u = currentUser();
+  if (!u || normalizeRole(u.role) !== 'admin') return toast('Only admin can create teams', 'err');
   const name = ((document.getElementById('new-team-name') || {}).value || '').trim();
   const dept = ((document.getElementById('new-team-dept') || {}).value || '').trim();
   const managerId = ((document.getElementById('new-team-manager') || {}).value || '') || null;
@@ -462,20 +558,50 @@ function wsCreateTeam() {
   roles.push({ id: `tr-${teamId}-member`, teamId, name: 'Member', permissions: ['chat', 'view_tasks', 'comment_tasks'] });
   saveTeamRoles(roles);
   const mem = teamMemberships();
-  DB.users.filter(u => u.status === 'active' && u.id !== ADMIN_ID).forEach(u => {
-    if (!mem.some(m => m.teamId === teamId && m.userId === u.id)) {
-      mem.push({ id: `${teamId}:${u.id}`, teamId, userId: u.id, teamRoleId: u.id === managerId ? `tr-${teamId}-manager` : `tr-${teamId}-member`, created: new Date().toISOString() });
-    }
-  });
+  if (managerId && !mem.some(m => m.teamId === teamId && m.userId === managerId)) {
+    mem.push({ id: `${teamId}:${managerId}`, teamId, userId: managerId, teamRoleId: `tr-${teamId}-manager`, created: new Date().toISOString() });
+  }
   saveTeamMemberships(mem);
+  pushStateToServer();
   navigate('admin', 'teams');
 }
 function wsSetTeamManager(teamId, managerId) {
+  const u = currentUser();
+  if (!u || normalizeRole(u.role) !== 'admin') return;
   const ts = teams();
   const i = ts.findIndex(t => t.id === teamId);
   if (i < 0) return;
   ts[i].managerId = managerId || null;
   saveTeams(ts);
+  if (managerId) {
+    const managerRoleId = `tr-${teamId}-manager`;
+    const roleList = teamRoles();
+    if (!roleList.some(r => r.id === managerRoleId)) {
+      roleList.push({ id: managerRoleId, teamId, name: 'Manager', permissions: ['manage_members', 'manage_roles', 'manage_tasks', 'chat'] });
+      saveTeamRoles(roleList);
+    }
+    const mem = teamMemberships();
+    const mi = mem.findIndex(m => m.teamId === teamId && m.userId === managerId);
+    if (mi >= 0) mem[mi].teamRoleId = managerRoleId;
+    else mem.push({ id: `${teamId}:${managerId}:${Date.now()}`, teamId, userId: managerId, teamRoleId: managerRoleId, created: new Date().toISOString() });
+    saveTeamMemberships(mem);
+  }
+  pushStateToServer();
+}
+function wsDeleteTeam(teamId) {
+  const u = currentUser();
+  if (!u || normalizeRole(u.role) !== 'admin') return;
+  if (!confirm('Delete this team and all related roles, members, tasks, and chats?')) return;
+  saveTeams(teams().filter(t => t.id !== teamId));
+  saveTeamRoles(teamRoles().filter(r => r.teamId !== teamId));
+  saveTeamMemberships(teamMemberships().filter(m => m.teamId !== teamId));
+  APP_STATE.collab.teamTasks = (APP_STATE.collab.teamTasks || []).filter(t => t.teamId !== teamId);
+  APP_STATE.collab.teamChats = (APP_STATE.collab.teamChats || []).filter(c => c.teamId !== teamId);
+  APP_STATE.collab.tasks = APP_STATE.collab.teamTasks;
+  APP_STATE.collab.chat = APP_STATE.collab.teamChats;
+  syncStateSoon();
+  pushStateToServer();
+  navigate('admin', 'teams');
 }
 
 function workspaceShellConfig(view) {
