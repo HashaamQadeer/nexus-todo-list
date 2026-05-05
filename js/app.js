@@ -2,31 +2,71 @@
    DATA LAYER
 ══════════════════════════════════════════════ */
 const ADMIN_ID = 'nexus-admin-root';
-const DB = {
-  get users()  { return JSON.parse(localStorage.getItem('nx2_users')||'[]'); },
-  set users(v) { localStorage.setItem('nx2_users', JSON.stringify(v)); },
-  get session(){ return localStorage.getItem('nx2_session'); },
-  set session(v){ if(v) localStorage.setItem('nx2_session',v); else localStorage.removeItem('nx2_session'); }
+const APP_STATE = {
+  users: [],
+  sessionUserId: null,
+  collab: { tasks: [], chat: [], activity: [], announcements: [] },
+  hydrated: false
 };
 
-function seedAdmin() {
-  let users = DB.users;
-  if (!users.find(u => u.id === ADMIN_ID)) {
-    users.unshift({
-      id: ADMIN_ID,
-      username: 'admin',
-      email: 'admin@nexus.io',
-      password: 'admin2077',
-      role: 'admin',
-      status: 'active',
-      created: new Date().toISOString(),
-      tasks: [],
-      notifications: []
+const DB = {
+  get users() { return APP_STATE.users; },
+  set users(v) { APP_STATE.users = Array.isArray(v) ? v : []; if (APP_STATE.hydrated) syncStateSoon(); },
+  get session() { return APP_STATE.sessionUserId; },
+  set session(v) { APP_STATE.sessionUserId = v || null; }
+};
+
+let syncTimer = null;
+let syncing = false;
+
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    method: options.method || 'GET',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    credentials: 'include',
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
+  return json;
+}
+
+function syncStateSoon() {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { pushStateToServer(); }, 220);
+}
+
+async function pushStateToServer() {
+  if (!APP_STATE.hydrated || syncing || !DB.session) return;
+  syncing = true;
+  try {
+    await api('/api/state', {
+      method: 'PUT',
+      body: { users: DB.users, collab: APP_STATE.collab }
     });
-    DB.users = users;
+  } catch (err) {
+    console.warn('state sync failed:', err.message);
+  } finally {
+    syncing = false;
   }
 }
-seedAdmin();
+
+async function hydrateFromServer() {
+  const ses = await api('/api/auth/session');
+  DB.session = ses.user ? ses.user.id : null;
+  if (!DB.session) {
+    DB.users = [];
+    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    APP_STATE.hydrated = true;
+    return;
+  }
+  const state = await api('/api/state');
+  DB.users = state.users || [];
+  APP_STATE.collab = state.collab || { tasks: [], chat: [], activity: [], announcements: [] };
+  APP_STATE.hydrated = true;
+  migrateUsersAndCollab();
+}
 
 function migrateUsersAndCollab() {
   let users = DB.users;
@@ -38,12 +78,16 @@ function migrateUsersAndCollab() {
     }
   });
   if (changed) DB.users = users;
-  if (!localStorage.getItem('nx2_team_tasks')) localStorage.setItem('nx2_team_tasks', '[]');
-  if (!localStorage.getItem('nx2_team_chat')) localStorage.setItem('nx2_team_chat', '[]');
-  if (!localStorage.getItem('nx2_activity')) localStorage.setItem('nx2_activity', '[]');
-  if (!localStorage.getItem('nx2_announcements')) localStorage.setItem('nx2_announcements', '[]');
+  if (!APP_STATE.collab || typeof APP_STATE.collab !== 'object') {
+    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    changed = true;
+  }
+  APP_STATE.collab.tasks = APP_STATE.collab.tasks || [];
+  APP_STATE.collab.chat = APP_STATE.collab.chat || [];
+  APP_STATE.collab.activity = APP_STATE.collab.activity || [];
+  APP_STATE.collab.announcements = APP_STATE.collab.announcements || [];
+  if (changed && APP_STATE.hydrated) syncStateSoon();
 }
-migrateUsersAndCollab();
 
 function routeRole(r) {
   if (r === 'user' || r === 'moderator') return 'employee';
@@ -154,6 +198,20 @@ function boot() {
   if (role === 'team_lead') { navigate('teamlead', defaultTab('teamlead')); return; }
   if (role === 'employee') { navigate('employee', defaultTab('employee')); return; }
   navigate('user','tasks');
+}
+
+async function initApp() {
+  try {
+    await hydrateFromServer();
+  } catch (err) {
+    console.error('Failed to initialize from server:', err);
+    toast('Server unavailable', 'err');
+    DB.session = null;
+    DB.users = [];
+    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    APP_STATE.hydrated = true;
+  }
+  boot();
 }
 
 /* ══════════════════════════════════════════════
@@ -715,42 +773,45 @@ function renderUserProfile(u) {
 /* ══════════════════════════════════════════════
    ACTIONS
 ══════════════════════════════════════════════ */
-function doLogin() {
+async function doLogin() {
   const username = document.getElementById('l-user').value.trim();
   const password = document.getElementById('l-pass').value;
-  const u = DB.users.find(u=>u.username===username && u.password===password);
-  if (!u) { showErr('login-err','Invalid username or password'); return; }
-  DB.session = u.id;
-  boot();
+  try {
+    await api('/api/auth/login', { method: 'POST', body: { username, password } });
+    await hydrateFromServer();
+    boot();
+  } catch (err) {
+    showErr('login-err', err.message || 'Invalid username or password');
+  }
 }
 
-function doSignup() {
+async function doSignup() {
   const username = document.getElementById('su-user').value.trim();
   const email    = document.getElementById('su-email').value.trim();
   const password = document.getElementById('su-pass').value;
   if (!username||!email||!password) { showErr('su-err','All fields required'); return; }
   if (password.length < 6) { showErr('su-err','Password must be at least 6 characters'); return; }
-  if (DB.users.find(u=>u.username===username)) { showErr('su-err','Username already taken'); return; }
-  const newUser = {
-    id: 'u-'+Date.now(),
-    username, email, password,
-    role:'employee', status:'pending',
-    created: new Date().toISOString(),
-    tasks:[], notifications:[]
-  };
-  let users = DB.users;
-  users.push(newUser);
-  DB.users = users;
-  pushNotif(ADMIN_ID, {
-    icon:'🆕', title:'New Agent Request',
-    msg:`${username} (${email}) has requested system access.`
-  });
-  DB.session = newUser.id;
-  showSuccess('su-ok','Request submitted! Awaiting admin approval…');
-  setTimeout(()=>boot(), 1800);
+  try {
+    await api('/api/auth/signup', { method: 'POST', body: { username, email, password } });
+    await hydrateFromServer();
+    pushNotif(ADMIN_ID, {
+      icon:'🆕', title:'New Agent Request',
+      msg:`${username} (${email}) has requested system access.`
+    });
+    showSuccess('su-ok','Request submitted! Awaiting admin approval…');
+    setTimeout(()=>boot(), 1200);
+  } catch (err) {
+    showErr('su-err', err.message || 'Signup failed');
+  }
 }
 
-function doLogout() { DB.session = null; navigate('login'); }
+async function doLogout() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+  DB.session = null;
+  DB.users = [];
+  APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+  navigate('login');
+}
 
 function approveUser(id) {
   updateUser(id, {status:'active'});
@@ -930,14 +991,19 @@ function clearUserNotifs() {
   navigate('user','notifs');
 }
 
-function changePassword() {
-  const u = currentUser();
+async function changePassword() {
   const cur = document.getElementById('pw-cur').value;
   const nw  = document.getElementById('pw-new').value;
-  if (cur !== u.password) { toast('Wrong current password','err'); return; }
   if (nw.length < 6) { toast('Min 6 characters','err'); return; }
-  updateUser(u.id, {password:nw});
-  toast('PASSWORD UPDATED');
+  try {
+    await api('/api/auth/change-password', {
+      method: 'POST',
+      body: { currentPassword: cur, newPassword: nw }
+    });
+    toast('PASSWORD UPDATED');
+  } catch (err) {
+    toast(err.message || 'Unable to change password', 'err');
+  }
 }
 
 /* ══════════════════════════════════════════════

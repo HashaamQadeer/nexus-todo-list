@@ -1,14 +1,26 @@
 /* NEXUS workspace: team tasks, chat, activity, announcements — requires globals from app.js */
 
 const Collab = {
-  get tasks() { return JSON.parse(localStorage.getItem('nx2_team_tasks') || '[]'); },
-  set tasks(v) { localStorage.setItem('nx2_team_tasks', JSON.stringify(v)); },
-  get chat() { return JSON.parse(localStorage.getItem('nx2_team_chat') || '[]'); },
-  set chat(v) { localStorage.setItem('nx2_team_chat', JSON.stringify(v)); },
-  get activity() { return JSON.parse(localStorage.getItem('nx2_activity') || '[]'); },
-  set activity(v) { localStorage.setItem('nx2_activity', JSON.stringify(v)); },
-  get announcements() { return JSON.parse(localStorage.getItem('nx2_announcements') || '[]'); },
-  set announcements(v) { localStorage.setItem('nx2_announcements', JSON.stringify(v)); }
+  get tasks() { return (APP_STATE.collab && APP_STATE.collab.tasks) || []; },
+  set tasks(v) {
+    APP_STATE.collab.tasks = Array.isArray(v) ? v : [];
+    if (APP_STATE.hydrated) syncStateSoon();
+  },
+  get chat() { return (APP_STATE.collab && APP_STATE.collab.chat) || []; },
+  set chat(v) {
+    APP_STATE.collab.chat = Array.isArray(v) ? v : [];
+    if (APP_STATE.hydrated) syncStateSoon();
+  },
+  get activity() { return (APP_STATE.collab && APP_STATE.collab.activity) || []; },
+  set activity(v) {
+    APP_STATE.collab.activity = Array.isArray(v) ? v : [];
+    if (APP_STATE.hydrated) syncStateSoon();
+  },
+  get announcements() { return (APP_STATE.collab && APP_STATE.collab.announcements) || []; },
+  set announcements(v) {
+    APP_STATE.collab.announcements = Array.isArray(v) ? v : [];
+    if (APP_STATE.hydrated) syncStateSoon();
+  }
 };
 
 function normalizeRole(role) {
@@ -808,4 +820,4 @@ function renderWorkspaceShell(view) {
 </div>`;
 }
 
-if (typeof boot === 'function') boot();
+if (typeof initApp === 'function') initApp();

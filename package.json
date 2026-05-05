@@ -1,0 +1,32 @@
+{
+  "name": "todo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"No tests configured\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HashaamQadeer/nexus-todo-list.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/HashaamQadeer/nexus-todo-list/issues"
+  },
+  "homepage": "https://github.com/HashaamQadeer/nexus-todo-list#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "connect-mongo": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "mongodb": "^7.2.0",
+    "mongoose": "^9.6.1"
+  }
+}
