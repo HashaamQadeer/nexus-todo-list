@@ -2,10 +2,45 @@
    DATA LAYER
 ══════════════════════════════════════════════ */
 const ADMIN_ID = 'nexus-admin-root';
+function createEmptyCollab() {
+  return {
+    tasks: [],
+    chat: [],
+    activity: [],
+    announcements: [],
+    teams: [],
+    teamRoles: [],
+    teamMemberships: [],
+    teamTasks: [],
+    teamChats: []
+  };
+}
+
+function migrateCollabShape(collab) {
+  const next = { ...createEmptyCollab(), ...(collab || {}) };
+  if (!next.teams.length) {
+    const manager = DB.users.find(u => routeRole(u.role) === 'manager' && u.status === 'active');
+    const teamId = 'team-general';
+    next.teams = [{ id: teamId, name: 'General Team', department: '', managerId: manager ? manager.id : null, created: new Date().toISOString() }];
+    next.teamRoles = [
+      { id: 'tr-manager', teamId, name: 'Manager', permissions: ['manage_members', 'manage_roles', 'manage_tasks', 'chat'] },
+      { id: 'tr-member', teamId, name: 'Member', permissions: ['chat', 'view_tasks', 'comment_tasks'] }
+    ];
+    next.teamMemberships = DB.users
+      .filter(u => u.id !== ADMIN_ID && u.status === 'active')
+      .map(u => ({ id: `${teamId}:${u.id}`, teamId, userId: u.id, teamRoleId: u.id === (manager ? manager.id : '') ? 'tr-manager' : 'tr-member', created: new Date().toISOString() }));
+  }
+  if (!next.teamTasks.length && Array.isArray(next.tasks)) next.teamTasks = next.tasks.map(t => ({ ...t, teamId: t.teamId || next.teams[0].id }));
+  if (!next.teamChats.length && Array.isArray(next.chat)) next.teamChats = next.chat.map(m => ({ ...m, teamId: m.teamId || next.teams[0].id, channelType: m.channelType || 'group' }));
+  next.tasks = next.teamTasks;
+  next.chat = next.teamChats;
+  return next;
+}
+
 const APP_STATE = {
   users: [],
   sessionUserId: null,
-  collab: { tasks: [], chat: [], activity: [], announcements: [] },
+  collab: createEmptyCollab(),
   hydrated: false
 };
 
@@ -57,13 +92,13 @@ async function hydrateFromServer() {
   DB.session = ses.user ? ses.user.id : null;
   if (!DB.session) {
     DB.users = [];
-    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    APP_STATE.collab = createEmptyCollab();
     APP_STATE.hydrated = true;
     return;
   }
   const state = await api('/api/state');
   DB.users = state.users || [];
-  APP_STATE.collab = state.collab || { tasks: [], chat: [], activity: [], announcements: [] };
+  APP_STATE.collab = migrateCollabShape(state.collab || createEmptyCollab());
   APP_STATE.hydrated = true;
   migrateUsersAndCollab();
 }
@@ -79,19 +114,21 @@ function migrateUsersAndCollab() {
   });
   if (changed) DB.users = users;
   if (!APP_STATE.collab || typeof APP_STATE.collab !== 'object') {
-    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    APP_STATE.collab = createEmptyCollab();
     changed = true;
   }
-  APP_STATE.collab.tasks = APP_STATE.collab.tasks || [];
-  APP_STATE.collab.chat = APP_STATE.collab.chat || [];
-  APP_STATE.collab.activity = APP_STATE.collab.activity || [];
-  APP_STATE.collab.announcements = APP_STATE.collab.announcements || [];
+  APP_STATE.collab = migrateCollabShape(APP_STATE.collab);
   if (changed && APP_STATE.hydrated) syncStateSoon();
 }
 
 function routeRole(r) {
   if (r === 'user' || r === 'moderator') return 'employee';
   return r;
+}
+
+// Shared role normalizer used by app.js and workspace.js.
+function normalizeRole(role) {
+  return routeRole(role);
 }
 
 function getUser(id)   { return DB.users.find(u => u.id === id); }
@@ -201,6 +238,8 @@ function boot() {
 }
 
 async function initApp() {
+  // Always show a visible auth screen immediately while hydration runs.
+  navigate('login');
   try {
     await hydrateFromServer();
   } catch (err) {
@@ -208,7 +247,7 @@ async function initApp() {
     toast('Server unavailable', 'err');
     DB.session = null;
     DB.users = [];
-    APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+    APP_STATE.collab = createEmptyCollab();
     APP_STATE.hydrated = true;
   }
   boot();
@@ -332,6 +371,7 @@ function renderAdminShell() {
     {id:'users',    icon:'⬡', label:'Agents'},
     {id:'tasks',    icon:'▸', label:'All Missions'},
     {id:'workspace',icon:'◇', label:'Workspace'},
+    {id:'teams',    icon:'⚑', label:'Teams'},
     {id:'notifs',   icon:'📡', label:'Notifications'},
   ];
   const unread = unreadCount(ADMIN_ID);
@@ -350,6 +390,7 @@ function renderAdminShell() {
   else if (currentTab==='users')    tabContent = renderAdminUsers();
   else if (currentTab==='tasks')    tabContent = renderAdminTasks();
   else if (currentTab==='workspace') tabContent = renderAdminWorkspace();
+  else if (currentTab==='teams')    tabContent = typeof renderAdminTeamsHub === 'function' ? renderAdminTeamsHub() : '';
   else if (currentTab==='notifs')   tabContent = renderAdminNotifs();
 
   return `
@@ -809,7 +850,7 @@ async function doLogout() {
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {}
   DB.session = null;
   DB.users = [];
-  APP_STATE.collab = { tasks: [], chat: [], activity: [], announcements: [] };
+  APP_STATE.collab = createEmptyCollab();
   navigate('login');
 }
 
@@ -1126,3 +1167,7 @@ document.querySelectorAll('.modal-overlay').forEach(el=>{
 /* ══════════════════════════════════════════════
    BOOT — runs from workspace.js after collaborators load
 ══════════════════════════════════════════════ */
+if (!window.__NEXUS_BOOTSTRAPPED__) {
+  window.__NEXUS_BOOTSTRAPPED__ = true;
+  initApp();
+}

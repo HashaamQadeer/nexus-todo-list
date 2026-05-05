@@ -48,6 +48,57 @@ function normalizeRole(role) {
   return role;
 }
 
+function createEmptyCollab() {
+  return {
+    tasks: [],
+    chat: [],
+    activity: [],
+    announcements: [],
+    teams: [],
+    teamRoles: [],
+    teamMemberships: [],
+    teamTasks: [],
+    teamChats: []
+  };
+}
+
+function migrateLegacyCollab(collab, users) {
+  const base = { ...createEmptyCollab(), ...(collab || {}) };
+  if (base.teams.length || base.teamTasks.length || base.teamChats.length) return base;
+  const firstManager = users.find((u) => normalizeRole(u.role) === "manager");
+  const seedMembers = users
+    .filter((u) => u.status === "active" && normalizeRole(u.role) !== "admin")
+    .map((u) => u.id);
+  const teamId = "team-general";
+  base.teams = [
+    {
+      id: teamId,
+      name: "General Team",
+      department: "",
+      managerId: firstManager ? firstManager.id : null,
+      created: new Date().toISOString()
+    }
+  ];
+  base.teamRoles = [
+    { id: "tr-manager", teamId, name: "Manager", permissions: ["manage_members", "manage_roles", "manage_tasks", "chat"] },
+    { id: "tr-member", teamId, name: "Member", permissions: ["chat", "view_tasks", "comment_tasks"] }
+  ];
+  base.teamMemberships = seedMembers.map((uid) => ({
+    id: `${teamId}:${uid}`,
+    teamId,
+    userId: uid,
+    teamRoleId: uid === (firstManager ? firstManager.id : "") ? "tr-manager" : "tr-member",
+    created: new Date().toISOString()
+  }));
+  base.teamTasks = Array.isArray(base.tasks)
+    ? base.tasks.map((t) => ({ ...t, teamId: t.teamId || teamId }))
+    : [];
+  base.teamChats = Array.isArray(base.chat)
+    ? base.chat.map((m) => ({ ...m, teamId: m.teamId || teamId, channelType: m.channelType || "group" }))
+    : [];
+  return base;
+}
+
 function docToUser(doc) {
   return {
     id: doc.id,
@@ -133,20 +184,55 @@ async function requireAuth(req, res, next) {
 async function loadState() {
   const userDocs = await User.find({}).sort({ created: 1 });
   const stateDoc = await AppState.findOne({ id: "global" });
+  const users = userDocs.map(docToUser);
+  const collab = migrateLegacyCollab(stateDoc?.collab || createEmptyCollab(), users);
   return {
-    users: userDocs.map(docToUser),
-    collab: stateDoc?.collab || { tasks: [], chat: [], activity: [], announcements: [] }
+    users,
+    collab
   };
 }
 
-async function saveState(input) {
+function normalizeCollabForPersist(collab, authUser) {
+  const next = migrateLegacyCollab(collab, []);
+  const teams = Array.isArray(next.teams) ? next.teams : [];
+  const teamById = new Map(teams.map((t) => [t.id, t]));
+  const allowedTeamIds =
+    normalizeRole(authUser.role) === "admin"
+      ? new Set(teams.map((t) => t.id))
+      : new Set(teams.filter((t) => t.managerId === authUser.id).map((t) => t.id));
+  const safeTeams = teams.filter((t) => {
+    if (normalizeRole(authUser.role) === "admin") return true;
+    return t.managerId === authUser.id || allowedTeamIds.has(t.id);
+  });
+  const safeIds = new Set(safeTeams.map((t) => t.id));
+  const safeRoles = (Array.isArray(next.teamRoles) ? next.teamRoles : []).filter((r) => safeIds.has(r.teamId));
+  const safeMemberships = (Array.isArray(next.teamMemberships) ? next.teamMemberships : []).filter((m) => safeIds.has(m.teamId));
+  const safeTasks = (Array.isArray(next.teamTasks) ? next.teamTasks : []).filter((t) => safeIds.has(t.teamId));
+  const safeChats = (Array.isArray(next.teamChats) ? next.teamChats : []).filter((m) => safeIds.has(m.teamId));
+  return {
+    ...createEmptyCollab(),
+    ...next,
+    teams: safeTeams,
+    teamRoles: safeRoles,
+    teamMemberships: safeMemberships,
+    teamTasks: safeTasks,
+    teamChats: safeChats,
+    tasks: safeTasks,
+    chat: safeChats
+  };
+}
+
+async function saveState(input, authUser) {
   const incomingUsers = Array.isArray(input.users) ? input.users : [];
   const incomingIds = new Set(incomingUsers.map((u) => u.id));
 
   const existing = await User.find({});
   const existingById = new Map(existing.map((u) => [u.id, u]));
 
+  const actorRole = normalizeRole(authUser.role);
+  const canEditUsers = actorRole === "admin";
   for (const u of incomingUsers) {
+    if (!canEditUsers) continue;
     const existingDoc = existingById.get(u.id);
     const payload = {
       id: u.id,
@@ -169,21 +255,19 @@ async function saveState(input) {
   }
 
   for (const u of existing) {
+    if (!canEditUsers) continue;
     if (u.id !== "nexus-admin-root" && !incomingIds.has(u.id)) {
       await User.deleteOne({ id: u.id });
     }
   }
 
+  const persistedCollab = normalizeCollabForPersist(input.collab, authUser);
+
   await AppState.updateOne(
     { id: "global" },
     {
       $set: {
-        collab: {
-          tasks: input.collab?.tasks || [],
-          chat: input.collab?.chat || [],
-          activity: input.collab?.activity || [],
-          announcements: input.collab?.announcements || []
-        }
+        collab: persistedCollab
       }
     },
     { upsert: true }
@@ -269,7 +353,7 @@ app.put("/api/state", requireAuth, async (req, res) => {
   if (!Array.isArray(state.users) || typeof state.collab !== "object" || state.collab === null) {
     return res.status(400).json({ error: "Invalid state payload" });
   }
-  await saveState(state);
+  await saveState(state, req.authUser);
   res.json({ ok: true });
 });
 
