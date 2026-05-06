@@ -245,6 +245,7 @@ function wsDeleteTeamTask(taskId) {
   navigate(currentView, currentTab);
 }
 function wsSetTeamTaskStatus(taskId, status) {
+  if (!VALID_TASK_STATUSES.has(status)) return toast('Invalid status', 'err');
   const u = currentUser();
   const arr = APP_STATE.collab.teamTasks || [];
   const i = arr.findIndex(t => t.id === taskId);
@@ -254,7 +255,10 @@ function wsSetTeamTaskStatus(taskId, status) {
   APP_STATE.collab.tasks = arr;
   syncStateSoon();
 }
+const VALID_TASK_STATUSES = new Set(['todo', 'in_progress', 'done']);
+
 function wsAssigneeSetStatus(taskId, status) {
+  if (!VALID_TASK_STATUSES.has(status)) return toast('Invalid status', 'err');
   const u = currentUser();
   const arr = APP_STATE.collab.teamTasks || [];
   const i = arr.findIndex(t => t.id === taskId);
@@ -264,16 +268,16 @@ function wsAssigneeSetStatus(taskId, status) {
   APP_STATE.collab.tasks = arr;
   syncStateSoon();
 }
-function wsAddAttachmentToOpenTask() {}
-
-function renderTeamTaskRow(t, openable) {
-  const click = openable ? `onclick="openTeamTaskModal('${t.id}')"` : '';
-  const assignees = (t.assignees || []).map(id => (getUser(id) || {}).username).filter(Boolean).join(', ');
-  return `<div class="task-item team-task-row p-${t.priority || 'medium'}" ${click} style="cursor:pointer"><div class="task-body" style="flex:1"><div class="task-text">${escHtml(t.title)}</div><div class="task-meta"><span class="badge-owner">${escHtml(assignees) || '—'}</span><span class="badge-cat">${escHtml(t.status || 'todo')}</span></div></div></div>`;
+// ── Attachment stubs ──────────────────────────────────────
+// File upload is not implemented yet (requires multipart/S3 integration).
+// These functions show a clear toast so the UI never silently does nothing.
+function wsStageFilesCreate() {
+  toast('File attachments coming soon', 'err');
+}
+function wsAddAttachmentToOpenTask() {
+  toast('File attachments coming soon', 'err');
 }
 
-let wtStagedFiles = [];
-function wsStageFilesCreate() {}
 function wsCreateTeamTaskWithFiles() {
   const u = currentUser();
   const tid = currentTeamId();
@@ -287,7 +291,7 @@ function wsCreateTeamTaskWithFiles() {
     return toast('Assignees must be members of this team', 'err');
   }
   const task = {
-    id: 'wt-' + Date.now(),
+    id: 'wt-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     teamId: tid,
     title,
     descriptionHtml: sanitizeRichHtml(((document.getElementById('wt-desc') || {}).innerHTML || '').trim()),
@@ -308,6 +312,12 @@ function wsCreateTeamTaskWithFiles() {
   APP_STATE.collab.tasks = arr;
   syncStateSoon();
   navigate('manager', 'board');
+}
+
+function renderTeamTaskRow(t, openable) {
+  const click = openable ? `onclick="openTeamTaskModal('${t.id}')"` : '';
+  const assignees = (t.assignees || []).map(id => (getUser(id) || {}).username).filter(Boolean).join(', ');
+  return `<div class="task-item team-task-row p-${t.priority || 'medium'}" ${click} style="cursor:pointer"><div class="task-body" style="flex:1"><div class="task-text">${escHtml(t.title)}</div><div class="task-meta"><span class="badge-owner">${escHtml(assignees) || '—'}</span><span class="badge-cat">${escHtml(t.status || 'todo')}</span></div></div></div>`;
 }
 
 function renderTeamSwitcher() {
@@ -551,8 +561,11 @@ function wsCreateTeam() {
   if (!name) return toast('Team name required', 'err');
   const teamId = `team-${Date.now()}`;
   const ts = teams();
+  console.log(`[NEXUS:wsCreateTeam] teams BEFORE push (${ts.length}):`, ts.map(t=>t.name));
   ts.push({ id: teamId, name, department: dept, managerId, created: new Date().toISOString() });
+  console.log(`[NEXUS:wsCreateTeam] teams AFTER push (${ts.length}):`, ts.map(t=>t.name));
   saveTeams(ts);
+  console.log(`[NEXUS:wsCreateTeam] APP_STATE.collab.teams after saveTeams (${(APP_STATE.collab.teams||[]).length}):`, (APP_STATE.collab.teams||[]).map(t=>t.name));
   const roles = teamRoles();
   roles.push({ id: `tr-${teamId}-manager`, teamId, name: 'Manager', permissions: ['manage_members', 'manage_roles', 'manage_tasks', 'chat'] });
   roles.push({ id: `tr-${teamId}-member`, teamId, name: 'Member', permissions: ['chat', 'view_tasks', 'comment_tasks'] });
@@ -562,6 +575,7 @@ function wsCreateTeam() {
     mem.push({ id: `${teamId}:${managerId}`, teamId, userId: managerId, teamRoleId: `tr-${teamId}-manager`, created: new Date().toISOString() });
   }
   saveTeamMemberships(mem);
+  console.log(`[NEXUS:wsCreateTeam] calling pushStateToServer. collab.teams count: ${(APP_STATE.collab.teams||[]).length}`);
   pushStateToServer();
   navigate('admin', 'teams');
 }
@@ -666,7 +680,5 @@ function renderWorkspaceShell(view) {
   return `<div class="dashboard"><aside class="sidebar"><div class="sidebar-logo"><span class="logo-tag">NEXUS WORKSPACE</span><div class="logo-name">NEXUS</div><div class="logo-role">${cfg.brand}</div></div><nav class="sidebar-nav"><div class="nav-section-label">WORK</div>${sidebarItems}</nav><div class="sidebar-footer"><div class="user-chip"><div class="user-avatar">${cfg.initials}</div><div class="user-info"><div class="user-name">${escHtml(u.username)}</div><div class="user-role">${cfg.roleLabel}</div></div></div></div></aside><div class="main-content"><div class="topbar"><div class="topbar-title">NEXUS / <span>${currentTab.toUpperCase()}</span></div><div class="notif-btn" onclick="navigate('${view}','notifs')">📡${cfg.unread ? `<span class="notif-count">${cfg.unread}</span>` : ''}</div><button class="logout-btn" onclick="doLogout()">LOGOUT</button></div><div class="page-content">${tabContent}</div></div></div>`;
 }
 
-if (!window.__NEXUS_BOOTSTRAPPED__ && typeof initApp === 'function') {
-  window.__NEXUS_BOOTSTRAPPED__ = true;
-  initApp();
-}
+// Boot is handled exclusively by app.js (loaded before this file).
+// Do not call initApp() here — app.js sets __NEXUS_BOOTSTRAPPED__ and fires it.

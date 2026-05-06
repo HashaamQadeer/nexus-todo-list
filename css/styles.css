@@ -256,8 +256,14 @@ body { cursor:none; }
   color:white; flex-shrink:0;
 }
 .user-info { flex:1; min-width:0; }
-.user-name { font-size:13px; font-weight:700; color:var(--cyan); truncate; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.user-role { font-family:'Orbitron',sans-serif; font-size:7px; letter-spacing:2px; color:var(--text2); }
+.user-name {
+  font-size:13px;
+  font-weight:700;
+  color:var(--cyan);
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}.user-role { font-family:'Orbitron',sans-serif; font-size:7px; letter-spacing:2px; color:var(--text2); }
 
 .main-content {
   margin-left:var(--sidebar);
@@ -667,3 +673,87 @@ input[type="date"].input-field::-webkit-calendar-picker-indicator { filter:inver
 .mt-16 { margin-top:16px; }
 .w-full { width:100%; }
 
+/* ===== PERFORMANCE PATCH ===== */
+
+@media (pointer:fine) {
+  body {
+    cursor: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,245,255,.18) transparent;
+}
+
+/* remove heavy shadows */
+.panel,
+.auth-card,
+.modal,
+.stat-card,
+.task-item,
+.notif-item,
+.btn,
+.btn-sm {
+  box-shadow: none !important;
+}
+
+/* lighter hover */
+.panel:hover,
+.stat-card:hover,
+.task-item:hover {
+  transform: translateY(-2px);
+}
+
+/* disable expensive animations */
+.stat-card,
+.empty-state .empty-icon,
+.nav-badge,
+.notif-count,
+.badge-pending {
+  animation: none !important;
+}
+
+/* lighter topbar */
+.topbar {
+  background: rgba(4,10,20,.92);
+  backdrop-filter: none;
+}
+
+/* fix invalid truncate */
+.user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* focus accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* mobile optimization */
+@media (max-width:700px) {
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-content {
+    padding: 16px;
+  }
+
+}

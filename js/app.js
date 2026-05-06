@@ -1,4 +1,4 @@
-﻿/* ══════════════════════════════════════════════
+/* ══════════════════════════════════════════════
    DATA LAYER
 ══════════════════════════════════════════════ */
 const ADMIN_ID = 'nexus-admin-root';
@@ -53,6 +53,33 @@ const DB = {
 
 let syncTimer = null;
 let syncing = false;
+let pendingSync = false;
+
+function syncStateSoon() {
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { pushStateToServer(); }, 220);
+}
+
+async function pushStateToServer() {
+  if (!APP_STATE.hydrated || !DB.session) return;
+  if (syncing) { pendingSync = true; return; }
+  syncing = true;
+  pendingSync = false;
+  try {
+    const payload = { users: DB.users, collab: APP_STATE.collab };
+    console.log(`[NEXUS:pushStateToServer] sending collab.teams (${(payload.collab.teams||[]).length}):`, JSON.stringify((payload.collab.teams||[]).map(t=>({id:t.id,name:t.name}))));
+    const result = await api('/api/state', {
+      method: 'PUT',
+      body: payload
+    });
+    console.log(`[NEXUS:pushStateToServer] server responded:`, result);
+  } catch (err) {
+    console.warn('state sync failed:', err.message);
+  } finally {
+    syncing = false;
+    if (pendingSync) syncStateSoon();
+  }
+}
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
@@ -67,26 +94,6 @@ async function api(path, options = {}) {
   return json;
 }
 
-function syncStateSoon() {
-  if (syncTimer) clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => { pushStateToServer(); }, 220);
-}
-
-async function pushStateToServer() {
-  if (!APP_STATE.hydrated || syncing || !DB.session) return;
-  syncing = true;
-  try {
-    await api('/api/state', {
-      method: 'PUT',
-      body: { users: DB.users, collab: APP_STATE.collab }
-    });
-  } catch (err) {
-    console.warn('state sync failed:', err.message);
-  } finally {
-    syncing = false;
-  }
-}
-
 async function hydrateFromServer() {
   const ses = await api('/api/auth/session');
   DB.session = ses.user ? ses.user.id : null;
@@ -97,10 +104,13 @@ async function hydrateFromServer() {
     return;
   }
   const state = await api('/api/state');
+  console.log(`[NEXUS:hydrateFromServer] received state.collab.teams (${(state.collab?.teams||[]).length}):`, JSON.stringify((state.collab?.teams||[]).map(t=>({id:t.id,name:t.name}))));
   DB.users = state.users || [];
   APP_STATE.collab = migrateCollabShape(state.collab || createEmptyCollab());
+  console.log(`[NEXUS:hydrateFromServer] after migrateCollabShape teams (${(APP_STATE.collab.teams||[]).length}):`, JSON.stringify((APP_STATE.collab.teams||[]).map(t=>({id:t.id,name:t.name}))));
   APP_STATE.hydrated = true;
   migrateUsersAndCollab();
+  console.log(`[NEXUS:hydrateFromServer] after migrateUsersAndCollab teams (${(APP_STATE.collab.teams||[]).length}):`, JSON.stringify((APP_STATE.collab.teams||[]).map(t=>({id:t.id,name:t.name}))));
 }
 
 function migrateUsersAndCollab() {
@@ -147,7 +157,7 @@ function pushNotif(userId, notif) {
   if (i < 0) return;
   users[i].notifications = users[i].notifications || [];
   users[i].notifications.unshift({
-    id: Date.now() + Math.random(),
+    id: 'notif-' + Date.now() + '-' + Math.random().toString(36).slice(2),
     ...notif,
     read: false,
     time: new Date().toISOString()
@@ -175,7 +185,7 @@ function addTaskToUser(userId, task) {
   const i = users.findIndex(u => u.id === userId);
   if (i < 0) return;
   users[i].tasks = users[i].tasks || [];
-  users[i].tasks.unshift({id: Date.now()+Math.random(), ...task, created: new Date().toISOString()});
+  users[i].tasks.unshift({id: 'task-' + Date.now() + '-' + Math.random().toString(36).slice(2), ...task, created: new Date().toISOString()});
   DB.users = users;
 }
 function updateTask(userId, taskId, changes) {
@@ -740,7 +750,7 @@ function renderUserTasks(u) {
       ? `<div class="empty-state"><div class="empty-icon">▸</div><p>No missions found</p></div>`
       : `<div class="task-list-wrap">${filtered.map((t,i)=>`
         <div class="task-item p-${t.pri||'medium'}" style="animation-delay:${i*.06}s">
-          <div class="task-check ${t.done?'checked':''}" onclick="toggleUserTask(${t.id})">${t.done?'✓':''}</div>
+          <div class="task-check ${t.done?'checked':''}" onclick="toggleUserTask('${t.id}')">${t.done?'✓':''}</div>
           <div class="task-body">
             <div class="task-text ${t.done?'done':''}">${escHtml(t.text)}</div>
             <div class="task-meta">
@@ -750,8 +760,8 @@ function renderUserTasks(u) {
             </div>
           </div>
           <div class="task-actions">
-            <button class="act-btn edit" onclick="openEditTask('${u.id}',${t.id})">✎</button>
-            <button class="act-btn del"  onclick="removeUserTask(${t.id})">✕</button>
+            <button class="act-btn edit" onclick="openEditTask('${u.id}','${t.id}')">✎</button>
+            <button class="act-btn del"  onclick="removeUserTask('${t.id}')">✕</button>
           </div>
         </div>`).join('')}</div>`}
   </div>
@@ -882,13 +892,16 @@ function deleteUser(id) {
   let users = DB.users;
   users = users.filter(u=>u.id!==id);
   DB.users = users;
-  if (typeof Collab !== 'undefined' && Collab.tasks) {
-    const next = Collab.tasks.map(t => ({
+  // Clean the user out of all team tasks without going through the Collab setter
+  // (the setter calls currentTeamId() which would be null if we just removed the session user)
+  if (APP_STATE.collab && Array.isArray(APP_STATE.collab.teamTasks)) {
+    APP_STATE.collab.teamTasks = APP_STATE.collab.teamTasks.map(t => ({
       ...t,
-      assignees: (t.assignees || []).filter(x => x !== id),
-      taggedUserIds: (t.taggedUserIds || []).filter(x => x !== id)
+      assignees:    (t.assignees    || []).filter(x => x !== id),
+      taggedUserIds:(t.taggedUserIds|| []).filter(x => x !== id)
     }));
-    Collab.tasks = next;
+    APP_STATE.collab.tasks = APP_STATE.collab.teamTasks;
+    if (APP_STATE.hydrated) syncStateSoon();
   }
   pushNotif(ADMIN_ID, { icon:'🗑', title:'Agent Removed', msg:`An agent was removed from the system.` });
   toast('AGENT DELETED'); navigate('admin', currentTab);
@@ -1085,7 +1098,10 @@ function fmtDateFull(iso) {
   return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
 }
 function escHtml(s) {
-  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Canonical version lives in workspace.js (loaded after this file).
+  // This shim handles calls made before workspace.js initialises.
+  return String(s || '').replace(/[&<>"']/g, ch =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
 }
 function updateNotifBadges() {
   const u = currentUser();
