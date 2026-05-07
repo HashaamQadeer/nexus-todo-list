@@ -264,7 +264,7 @@ function wsAssigneeSetStatus(taskId, status) {
   APP_STATE.collab.tasks = arr;
   syncStateSoon();
 }
-function wsAddAttachmentToOpenTask() {}
+function wsAddAttachmentToOpenTask() { }
 
 function renderTeamTaskRow(t, openable) {
   const click = openable ? `onclick="openTeamTaskModal('${t.id}')"` : '';
@@ -273,7 +273,7 @@ function renderTeamTaskRow(t, openable) {
 }
 
 let wtStagedFiles = [];
-function wsStageFilesCreate() {}
+function wsStageFilesCreate() { }
 function wsCreateTeamTaskWithFiles() {
   const u = currentUser();
   const tid = currentTeamId();
@@ -364,7 +364,7 @@ function renderChatPanel() {
   const group = all.filter(c => (c.channelType || 'group') === 'group').slice(-40);
   const members = assignableUsers(tid).filter(x => x.id !== u.id);
   const dm = activeDmPeer ? all.filter(c => c.channelType === 'dm' && ((c.fromUserId === u.id && c.toUserId === activeDmPeer) || (c.fromUserId === activeDmPeer && c.toUserId === u.id))).slice(-40) : [];
-  return `${renderTeamSwitcher()}<div class="panel chat-panel"><div class="panel-head"><h3>Team Group Chat</h3></div><div class="panel-body"><div class="chat-thread">${group.map(m => `<div class="chat-msg"><b>${escHtml((getUser(m.fromUserId)||{}).username||'Unknown')}:</b> ${escHtml(m.text || '')}</div>`).join('')}</div><div class="form-inline mt-8"><input class="input-field" id="chat-input" placeholder="Message group..."/><button class="btn-sm btn-info" onclick="wsSendTeamChat()">SEND</button></div></div></div><div class="panel"><div class="panel-head"><h3>Direct Messages</h3></div><div class="panel-body"><div style="display:flex;gap:8px;flex-wrap:wrap">${members.map(m => `<button class="btn-sm btn-outline" onclick="wsOpenDm('${m.id}')">${escHtml(m.username)}</button>`).join('')}</div>${activeDmPeer ? `<div class="mt-12">${dm.map(m => `<div class="chat-msg">${m.fromUserId === u.id ? 'You' : escHtml((getUser(m.fromUserId)||{}).username||'Unknown')}: ${escHtml(m.text||'')}</div>`).join('')}</div><div class="form-inline mt-8"><input class="input-field" id="chat-dm-input" placeholder="Message ${(getUser(activeDmPeer)||{}).username || ''}..."/><button class="btn-sm btn-purple" onclick="wsSendDm()">SEND DM</button></div>` : '<p class="text-muted mt-8">Select a member to open DM.</p>'}</div></div>`;
+  return `${renderTeamSwitcher()}<div class="panel chat-panel"><div class="panel-head"><h3>Team Group Chat</h3></div><div class="panel-body"><div class="chat-thread">${group.map(m => `<div class="chat-msg"><b>${escHtml((getUser(m.fromUserId) || {}).username || 'Unknown')}:</b> ${escHtml(m.text || '')}</div>`).join('')}</div><div class="form-inline mt-8"><input class="input-field" id="chat-input" placeholder="Message group..."/><button class="btn-sm btn-info" onclick="wsSendTeamChat()">SEND</button></div></div></div><div class="panel"><div class="panel-head"><h3>Direct Messages</h3></div><div class="panel-body"><div style="display:flex;gap:8px;flex-wrap:wrap">${members.map(m => `<button class="btn-sm btn-outline" onclick="wsOpenDm('${m.id}')">${escHtml(m.username)}</button>`).join('')}</div>${activeDmPeer ? `<div class="mt-12">${dm.map(m => `<div class="chat-msg">${m.fromUserId === u.id ? 'You' : escHtml((getUser(m.fromUserId) || {}).username || 'Unknown')}: ${escHtml(m.text || '')}</div>`).join('')}</div><div class="form-inline mt-8"><input class="input-field" id="chat-dm-input" placeholder="Message ${(getUser(activeDmPeer) || {}).username || ''}..."/><button class="btn-sm btn-purple" onclick="wsSendDm()">SEND DM</button></div>` : '<p class="text-muted mt-8">Select a member to open DM.</p>'}</div></div>`;
 }
 function wsSendTeamChat() {
   const input = document.getElementById('chat-input');
